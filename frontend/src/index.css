@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer utilities {
+  .theme-bg {
+    @apply transition-colors duration-300 min-h-screen p-6 md:p-8;
+  }
+  .theme-bg.dark {
+    background-color: #070b13;
+    color: #f1f5f9;
+  }
+  .theme-bg.light {
+    background-color: #f4f7fa;
+    color: #1e293b;
+  }
+  
+  .theme-card {
+    @apply rounded-xl shadow-lg border backdrop-blur-md transition-all duration-300;
+  }
+  .theme-card.dark {
+    background-color: rgba(30, 41, 59, 0.7);
+    border-color: rgba(51, 65, 85, 0.5);
+    color: #f1f5f9;
+  }
+  .theme-card.light {
+    background-color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(226, 232, 240, 0.9);
+    color: #1e293b;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  }
+
+  .theme-input {
+    @apply rounded-lg border outline-none transition-all duration-300 text-sm p-2;
+  }
+  .theme-input.dark {
+    background-color: #1e293b;
+    border-color: #334155;
+    color: #ffffff;
+  }
+  .theme-input.light {
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+    color: #1e293b;
+  }
+
+  .theme-btn {
+    @apply rounded-lg border text-sm px-4 py-2 transition-all duration-300 flex items-center gap-2;
+  }
+  .theme-btn.dark {
+    background-color: #1e293b;
+    border-color: #334155;
+    color: #ffffff;
+  }
+  .theme-btn.dark:hover {
+    background-color: #334155;
+  }
+  .theme-btn.light {
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+    color: #1e293b;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  .theme-btn.light:hover {
+    background-color: #f1f5f9;
+  }
+
+  .theme-text-muted {
+    @apply transition-colors duration-300;
+  }
+  .theme-text-muted.dark {
+    color: #94a3b8;
+  }
+  .theme-text-muted.light {
+    color: #64748b;
+  }
+  
+  .theme-border {
+    @apply transition-colors duration-300;
+  }
+  .theme-border.dark {
+    border-color: #334155;
+  }
+  .theme-border.light {
+    border-color: #e2e8f0;
+  }
+}

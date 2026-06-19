@@ -1,0 +1,23 @@
+# Node dependencies
+node_modules/
+frontend/node_modules/
+
+# Python virtual environments
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+backend/__pycache__/
+
+# Local databases and data files
+*.db
+backend/*.db
+*.csv
+
+# IDEs and local configurations
+.vscode/
+.idea/
+.env
+frontend/.env
+backend/.env
