@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
   LineChart, 
@@ -116,13 +116,26 @@ const App = () => {
   const [timeRange, setTimeRange] = useState('24h');
   const [isOnline, setIsOnline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [alertLogs, setAlertLogs] = useState([]);
 
-  // Added States
+  // Theme, Filter, Clock States
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [resolution, setResolution] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Controlled Zoom & Pan States
+  const [zoomStart, setZoomStart] = useState(null);
+  const [zoomEnd, setZoomEnd] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartIndex, setDragStartIndex] = useState(null);
+
+  // Event Listener refs for Scroll Zoom
+  const chartRef1 = useRef(null);
+  const chartRef2 = useRef(null);
+  const chartRef3 = useRef(null);
+  const chartRef4 = useRef(null);
 
   // Clock Effect
   useEffect(() => {
@@ -131,6 +144,26 @@ const App = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const fetchAlertLogs = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/data/alerts`);
+      setAlertLogs(response.data);
+    } catch (error) {
+      console.error("Error fetching alert logs", error);
+    }
+  };
+
+  const handleClearAlertLogs = async () => {
+    if (window.confirm("คุณต้องการล้างประวัติการแจ้งเตือนทั้งหมดใช่หรือไม่?")) {
+      try {
+        await axios.post(`${API_BASE_URL}/data/alerts/clear`);
+        setAlertLogs([]);
+      } catch (error) {
+        console.error("Error clearing alert logs", error);
+      }
+    }
+  };
 
   const fetchLatestData = async () => {
     try {
@@ -158,16 +191,24 @@ const App = () => {
       }
       
       const response = await axios.get(`${API_BASE_URL}/data/${activeTab}/history`, { params });
-      const formattedData = response.data.map(item => ({
-        ...item,
-        displayTime: new Date(item.timestamp).toLocaleString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: false
-        })
-      }));
+      const formattedData = response.data.map(item => {
+        const dateStr = item.timestamp ? item.timestamp.replace(' ', 'T') : '';
+        const parsedDate = new Date(dateStr);
+        const displayTime = isNaN(parsedDate.getTime()) 
+          ? (item.timestamp || '') 
+          : parsedDate.toLocaleString('en-US', { 
+              month: 'short', 
+              day: 'numeric', 
+              hour: '2-digit', 
+              minute: '2-digit',
+              hour12: false
+            });
+            
+        return {
+          ...item,
+          displayTime
+        };
+      });
       setHistoryData(formattedData);
     } catch (error) {
       console.error("Error fetching history data", error);
@@ -180,11 +221,13 @@ const App = () => {
     setIsOnline(false);
     fetchLatestData();
     fetchHistoryData();
+    fetchAlertLogs();
   }, [activeTab]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       fetchLatestData();
+      fetchAlertLogs();
     }, 5000);
     return () => clearInterval(interval);
   }, [activeTab, lastUpdated]);
@@ -192,6 +235,108 @@ const App = () => {
   useEffect(() => {
     fetchHistoryData();
   }, [timeRange, activeTab, startTime, endTime, resolution]);
+
+  // Sync zoom boundaries on history update
+  useEffect(() => {
+    if (historyData.length > 0) {
+      setZoomStart(0);
+      setZoomEnd(historyData.length - 1);
+    } else {
+      setZoomStart(null);
+      setZoomEnd(null);
+    }
+  }, [historyData]);
+
+  // Synchronize values to a ref to bypass stale closure warnings
+  const zoomStateRef = useRef({ zoomStart, zoomEnd, historyData });
+  useEffect(() => {
+    zoomStateRef.current = { zoomStart, zoomEnd, historyData };
+  }, [zoomStart, zoomEnd, historyData]);
+
+  // Handle Scroll Zoom (Scroll Wheel)
+  useEffect(() => {
+    const handleWheel = (e) => {
+      const { zoomStart: zStart, zoomEnd: zEnd, historyData: hData } = zoomStateRef.current;
+      if (!hData || hData.length === 0 || zStart === null || zEnd === null) return;
+
+      e.preventDefault();
+
+      const delta = e.deltaY;
+      const currentRange = zEnd - zStart;
+      const zoomAmount = Math.max(1, Math.floor(hData.length * 0.04)); // 4% zoom step
+
+      if (delta < 0) {
+        // Scroll Up: Zoom In
+        if (currentRange > 5) {
+          const newStart = Math.min(zEnd - 5, zStart + zoomAmount);
+          const newEnd = Math.max(zStart + 5, zEnd - zoomAmount);
+          setZoomStart(newStart);
+          setZoomEnd(newEnd);
+        }
+      } else {
+        // Scroll Down: Zoom Out
+        const newStart = Math.max(0, zStart - zoomAmount);
+        const newEnd = Math.min(hData.length - 1, zEnd + zoomAmount);
+        setZoomStart(newStart);
+        setZoomEnd(newEnd);
+      }
+    };
+
+    const elements = [chartRef1.current, chartRef2.current, chartRef3.current, chartRef4.current];
+    elements.forEach(el => {
+      if (el) {
+        el.addEventListener('wheel', handleWheel, { passive: false });
+      }
+    });
+
+    return () => {
+      elements.forEach(el => {
+        if (el) {
+          el.removeEventListener('wheel', handleWheel);
+        }
+      });
+    };
+  }, [activeTab]);
+
+  // Drag-to-Pan (Grab and Drag timeline) Handlers
+  const handleChartMouseDown = (e) => {
+    if (e && e.activeTooltipIndex !== undefined) {
+      setIsDragging(true);
+      setDragStartIndex(e.activeTooltipIndex);
+    }
+  };
+
+  const handleChartMouseMove = (e) => {
+    if (isDragging && dragStartIndex !== null && e && e.activeTooltipIndex !== undefined) {
+      const diff = e.activeTooltipIndex - dragStartIndex;
+      if (diff !== 0) {
+        const { zoomStart: zStart, zoomEnd: zEnd, historyData: hData } = zoomStateRef.current;
+        if (zStart === null || zEnd === null || !hData || hData.length === 0) return;
+
+        const shift = -diff;
+        let newStart = zStart + shift;
+        let newEnd = zEnd + shift;
+        const currentRange = zEnd - zStart;
+
+        if (newStart < 0) {
+          newStart = 0;
+          newEnd = Math.min(hData.length - 1, newStart + currentRange);
+        } else if (newEnd > hData.length - 1) {
+          newEnd = hData.length - 1;
+          newStart = Math.max(0, newEnd - currentRange);
+        }
+
+        setZoomStart(newStart);
+        setZoomEnd(newEnd);
+        setDragStartIndex(e.activeTooltipIndex);
+      }
+    }
+  };
+
+  const handleChartMouseUp = () => {
+    setIsDragging(false);
+    setDragStartIndex(null);
+  };
 
   const handleExport = () => {
     const params = [];
@@ -362,18 +507,37 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
               <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Temperature & Humidity</h3>
-              <div className="h-[300px] w-full">
+              <div ref={chartRef1} className="h-[380px] w-full select-none">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historyData}>
+                  <LineChart 
+                    data={historyData} 
+                    margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
+                    onMouseDown={handleChartMouseDown}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseUp={handleChartMouseUp}
+                    onMouseLeave={handleChartMouseUp}
+                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="left" domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="right" domain={[0, 100]} orientation="right" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
-                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Line yAxisId="left" type="monotone" dataKey="temperature" name="Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
                     <Line yAxisId="right" type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
-                    <Brush dataKey="displayTime" height={20} stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} fill={isDarkMode ? "#1e293b" : "#f1f5f9"} />
+                    <Brush 
+                      dataKey="displayTime" 
+                      height={20} 
+                      stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} 
+                      fill={isDarkMode ? "#1e293b" : "#f1f5f9"}
+                      startIndex={zoomStart ?? 0}
+                      endIndex={zoomEnd ?? (historyData.length - 1)}
+                      onChange={(obj) => {
+                        setZoomStart(obj.startIndex);
+                        setZoomEnd(obj.endIndex);
+                      }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -381,18 +545,37 @@ const App = () => {
 
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
               <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Air Quality (eCO2 & TVOC)</h3>
-              <div className="h-[300px] w-full">
+              <div ref={chartRef2} className="h-[380px] w-full select-none">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historyData}>
+                  <LineChart 
+                    data={historyData} 
+                    margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
+                    onMouseDown={handleChartMouseDown}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseUp={handleChartMouseUp}
+                    onMouseLeave={handleChartMouseUp}
+                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="left" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="right" orientation="right" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
-                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Line yAxisId="left" type="monotone" dataKey="eco2" name="eCO2 (ppm)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
                     <Line yAxisId="right" type="monotone" dataKey="tvoc" name="TVOC (ppb)" stroke="#f59e0b" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#f59e0b', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
-                    <Brush dataKey="displayTime" height={20} stroke={isDarkMode ? "#10b981" : "#cbd5e1"} fill={isDarkMode ? "#1e293b" : "#f1f5f9"} />
+                    <Brush 
+                      dataKey="displayTime" 
+                      height={20} 
+                      stroke={isDarkMode ? "#10b981" : "#cbd5e1"} 
+                      fill={isDarkMode ? "#1e293b" : "#f1f5f9"}
+                      startIndex={zoomStart ?? 0}
+                      endIndex={zoomEnd ?? (historyData.length - 1)}
+                      onChange={(obj) => {
+                        setZoomStart(obj.startIndex);
+                        setZoomEnd(obj.endIndex);
+                      }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -414,18 +597,37 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
               <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>DHT22 Ambient Environment</h3>
-              <div className="h-[300px] w-full">
+              <div ref={chartRef3} className="h-[380px] w-full select-none">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historyData}>
+                  <LineChart 
+                    data={historyData} 
+                    margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
+                    onMouseDown={handleChartMouseDown}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseUp={handleChartMouseUp}
+                    onMouseLeave={handleChartMouseUp}
+                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="left" domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="right" domain={[0, 100]} orientation="right" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
-                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Line yAxisId="left" type="monotone" dataKey="dht_temp" name="DHT Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
                     <Line yAxisId="right" type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
-                    <Brush dataKey="displayTime" height={20} stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} fill={isDarkMode ? "#1e293b" : "#f1f5f9"} />
+                    <Brush 
+                      dataKey="displayTime" 
+                      height={20} 
+                      stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} 
+                      fill={isDarkMode ? "#1e293b" : "#f1f5f9"}
+                      startIndex={zoomStart ?? 0}
+                      endIndex={zoomEnd ?? (historyData.length - 1)}
+                      onChange={(obj) => {
+                        setZoomStart(obj.startIndex);
+                        setZoomEnd(obj.endIndex);
+                      }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -433,18 +635,37 @@ const App = () => {
 
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
               <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>DS18B20 Multi-Point Temperatures</h3>
-              <div className="h-[300px] w-full">
+              <div ref={chartRef4} className="h-[380px] w-full select-none">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historyData}>
+                  <LineChart 
+                    data={historyData} 
+                    margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
+                    onMouseDown={handleChartMouseDown}
+                    onMouseMove={handleChartMouseMove}
+                    onMouseUp={handleChartMouseUp}
+                    onMouseLeave={handleChartMouseUp}
+                    style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
-                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
                     <Line type="monotone" dataKey="ds2_temp" name="Optical Table 1 (°C)" stroke="#06b6d4" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#06b6d4', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
                     <Line type="monotone" dataKey="ds3_temp" name="Optical Table 2 (°C)" stroke="#0891b2" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#0891b2', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
-                    <Brush dataKey="displayTime" height={20} stroke={isDarkMode ? "#22d3ee" : "#cbd5e1"} fill={isDarkMode ? "#1e293b" : "#f1f5f9"} />
+                    <Brush 
+                      dataKey="displayTime" 
+                      height={20} 
+                      stroke={isDarkMode ? "#22d3ee" : "#cbd5e1"} 
+                      fill={isDarkMode ? "#1e293b" : "#f1f5f9"}
+                      startIndex={zoomStart ?? 0}
+                      endIndex={zoomEnd ?? (historyData.length - 1)}
+                      onChange={(obj) => {
+                        setZoomStart(obj.startIndex);
+                        setZoomEnd(obj.endIndex);
+                      }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -452,6 +673,91 @@ const App = () => {
           </div>
         </>
       )}
+
+      {/* Alert History Section */}
+      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 mt-8`}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className={`text-xl font-semibold flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+            <AlertTriangle className="text-red-500 animate-pulse" size={24} />
+            ประวัติการแจ้งเตือนภัย (Alert History Log)
+          </h2>
+          {alertLogs.length > 0 && (
+            <button
+              onClick={handleClearAlertLogs}
+              className="text-xs text-red-500 hover:text-red-600 font-semibold px-3 py-1.5 border border-red-500/20 hover:border-red-500/50 rounded-lg transition-colors"
+            >
+              ล้างประวัติ
+            </button>
+          )}
+        </div>
+
+        {alertLogs.length === 0 ? (
+          <p className={`text-sm text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+            ไม่มีประวัติการแจ้งเตือนภัยในระบบ
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left border-collapse">
+              <thead>
+                <tr className={`border-b ${isDarkMode ? 'border-slate-800 text-gray-400' : 'border-slate-200 text-slate-500'} text-xs font-semibold uppercase tracking-wider`}>
+                  <th className="py-3 px-4">วัน-เวลา</th>
+                  <th className="py-3 px-4">ห้อง</th>
+                  <th className="py-3 px-4">เซนเซอร์</th>
+                  <th className="py-3 px-4 text-center">ค่าที่วัดได้</th>
+                  <th className="py-3 px-4 text-center">เกณฑ์ความปลอดภัย</th>
+                  <th className="py-3 px-4">รายละเอียด</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alertLogs.map((log) => {
+                  const alertDate = new Date(log.timestamp);
+                  const timeStr = isNaN(alertDate.getTime()) 
+                    ? log.timestamp 
+                    : alertDate.toLocaleString('th-TH', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                      });
+
+                  const isCleanroom = log.room === 'cleanroom';
+                  const roomBadgeColor = isCleanroom 
+                    ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                    : 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+
+                  return (
+                    <tr 
+                      key={log.id} 
+                      className={`border-b ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/20' : 'border-slate-100 hover:bg-slate-50/50'} transition-colors`}
+                    >
+                      <td className={`py-4 px-4 font-mono text-xs ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>{timeStr}</td>
+                      <td className="py-4 px-4">
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roomBadgeColor}`}>
+                          {isCleanroom ? 'Cleanroom' : 'Fablab'}
+                        </span>
+                      </td>
+                      <td className={`py-4 px-4 font-medium ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{log.sensor}</td>
+                      <td className="py-4 px-4 text-center font-bold text-red-500">
+                        {log.value.toFixed(1)}{log.sensor.toLowerCase().includes('hum') ? '%' : '°C'}
+                      </td>
+                      <td className={`py-4 px-4 text-center font-mono text-xs ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                        {log.sensor.toLowerCase().includes('hum') 
+                          ? `< ${log.limit_value}%` 
+                          : `${log.limit_value === 40.0 ? '10 - 40°C' : log.limit_value + '°C'}`}
+                      </td>
+                      <td className={`py-4 px-4 ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>
+                        {log.message}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -27,3 +27,15 @@ class CleanroomResponse(CleanroomCreate):
 
     class Config:
         from_attributes = True
+
+class AlertLogResponse(BaseModel):
+    id: int
+    timestamp: datetime
+    room: str
+    sensor: str
+    value: float
+    limit_value: float
+    message: str
+
+    class Config:
+        from_attributes = True

@@ -1,6 +1,17 @@
-from sqlalchemy import Column, Integer, Float, DateTime
+from sqlalchemy import Column, Integer, Float, DateTime, String
 from datetime import datetime
 from database import Base
+
+class AlertLog(Base):
+    __tablename__ = "alert_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.now)
+    room = Column(String)
+    sensor = Column(String)
+    value = Column(Float)
+    limit_value = Column(Float)
+    message = Column(String)
 
 class FablabData(Base):
     __tablename__ = "fablab_data"

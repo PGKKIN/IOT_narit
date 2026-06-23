@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-pydantic
-python-multipart
-pyserial
-requests
-flask
