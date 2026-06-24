@@ -24,7 +24,10 @@ import {
   Sun,
   Moon,
   Calendar,
-  Sliders
+  Sliders,
+  Mail,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 const API_BASE_URL = `http://${window.location.hostname}:8000`;
@@ -117,6 +120,8 @@ const App = () => {
   const [isOnline, setIsOnline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [alertLogs, setAlertLogs] = useState([]);
+  const [recipientEmails, setRecipientEmails] = useState([]);
+  const [newEmail, setNewEmail] = useState('');
 
   // Theme, Filter, Clock States
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -161,6 +166,49 @@ const App = () => {
         setAlertLogs([]);
       } catch (error) {
         console.error("Error clearing alert logs", error);
+      }
+    }
+  };
+
+  const fetchRecipientEmails = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/config/emails`);
+      setRecipientEmails(response.data);
+    } catch (error) {
+      console.error("Error fetching recipient emails", error);
+    }
+  };
+
+  const handleAddEmail = async (e) => {
+    e.preventDefault();
+    const email = newEmail.trim().toLowerCase();
+    if (!email) return;
+    
+    if (!email.includes('@') || !email.includes('.')) {
+      alert("กรุณากรอกรูปแบบอีเมลให้ถูกต้อง");
+      return;
+    }
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/config/emails`, { email });
+      setRecipientEmails(response.data);
+      setNewEmail('');
+    } catch (error) {
+      console.error("Error adding email", error);
+      alert(error.response?.data?.detail || "เกิดข้อผิดพลาดในการเพิ่มอีเมล");
+    }
+  };
+
+  const handleRemoveEmail = async (emailToRemove) => {
+    if (window.confirm(`คุณต้องการลบอีเมล ${emailToRemove} ออกจากการแจ้งเตือนใช่หรือไม่?`)) {
+      try {
+        const response = await axios.delete(`${API_BASE_URL}/config/emails`, {
+          params: { email: emailToRemove }
+        });
+        setRecipientEmails(response.data);
+      } catch (error) {
+        console.error("Error removing email", error);
+        alert(error.response?.data?.detail || "เกิดข้อผิดพลาดในการลบอีเมล");
       }
     }
   };
@@ -222,15 +270,17 @@ const App = () => {
     fetchLatestData();
     fetchHistoryData();
     fetchAlertLogs();
+    fetchRecipientEmails();
   }, [activeTab]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       fetchLatestData();
       fetchAlertLogs();
-    }, 5000);
+      fetchHistoryData();
+    }, 10000); // Refresh all data every 10 seconds
     return () => clearInterval(interval);
-  }, [activeTab, lastUpdated]);
+  }, [activeTab, lastUpdated, timeRange, startTime, endTime, resolution]);
 
   useEffect(() => {
     fetchHistoryData();
@@ -520,7 +570,7 @@ const App = () => {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="left" domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="left" domain={[dataMin => Math.min(10, Math.floor(dataMin)), dataMax => Math.max(40, Math.ceil(dataMax))]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="right" domain={[0, 100]} orientation="right" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -610,7 +660,7 @@ const App = () => {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="left" domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="left" domain={[dataMin => Math.min(10, Math.floor(dataMin)), dataMax => Math.max(40, Math.ceil(dataMax))]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="right" domain={[0, 100]} orientation="right" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -648,7 +698,7 @@ const App = () => {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
-                    <YAxis domain={[10, 40]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <YAxis domain={[dataMin => Math.min(10, Math.floor(dataMin)), dataMax => Math.max(40, Math.ceil(dataMax))]} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} />
@@ -674,89 +724,149 @@ const App = () => {
         </>
       )}
 
-      {/* Alert History Section */}
-      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 mt-8`}>
-        <div className="flex justify-between items-center mb-6">
-          <h2 className={`text-xl font-semibold flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-            <AlertTriangle className="text-red-500 animate-pulse" size={24} />
-            ประวัติการแจ้งเตือนภัย (Alert History Log)
-          </h2>
-          {alertLogs.length > 0 && (
-            <button
-              onClick={handleClearAlertLogs}
-              className="text-xs text-red-500 hover:text-red-600 font-semibold px-3 py-1.5 border border-red-500/20 hover:border-red-500/50 rounded-lg transition-colors"
-            >
-              ล้างประวัติ
-            </button>
+      {/* Split Grid for Alerts & Email Management */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+        
+        {/* Alert History Section (Left 2/3) */}
+        <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 lg:col-span-2 flex flex-col`}>
+          <div className="flex justify-between items-center mb-6">
+            <h2 className={`text-xl font-semibold flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+              <AlertTriangle className="text-red-500 animate-pulse" size={24} />
+              ประวัติการแจ้งเตือนภัย (Alert History Log)
+            </h2>
+            {alertLogs.length > 0 && (
+              <button
+                onClick={handleClearAlertLogs}
+                className="text-xs text-red-500 hover:text-red-600 font-semibold px-3 py-1.5 border border-red-500/20 hover:border-red-500/50 rounded-lg transition-colors"
+              >
+                ล้างประวัติ
+              </button>
+            )}
+          </div>
+
+          {alertLogs.length === 0 ? (
+            <p className={`text-sm text-center py-8 my-auto ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+              ไม่มีประวัติการแจ้งเตือนภัยในระบบ
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left border-collapse">
+                <thead>
+                  <tr className={`border-b ${isDarkMode ? 'border-slate-800 text-gray-400' : 'border-slate-200 text-slate-500'} text-xs font-semibold uppercase tracking-wider`}>
+                    <th className="py-3 px-4">วัน-เวลา</th>
+                    <th className="py-3 px-4">ห้อง</th>
+                    <th className="py-3 px-4">เซนเซอร์</th>
+                    <th className="py-3 px-4 text-center">ค่าที่วัดได้</th>
+                    <th className="py-3 px-4 text-center">เกณฑ์ความปลอดภัย</th>
+                    <th className="py-3 px-4">รายละเอียด</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alertLogs.map((log) => {
+                    const alertDate = new Date(log.timestamp);
+                    const timeStr = isNaN(alertDate.getTime()) 
+                      ? log.timestamp 
+                      : alertDate.toLocaleString('th-TH', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        });
+
+                    const isCleanroom = log.room === 'cleanroom';
+                    const roomBadgeColor = isCleanroom 
+                      ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                      : 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+
+                    return (
+                      <tr 
+                        key={log.id} 
+                        className={`border-b ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/20' : 'border-slate-100 hover:bg-slate-50/50'} transition-colors`}
+                      >
+                        <td className={`py-4 px-4 font-mono text-xs ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>{timeStr}</td>
+                        <td className="py-4 px-4">
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roomBadgeColor}`}>
+                            {isCleanroom ? 'Cleanroom' : 'Fablab'}
+                          </span>
+                        </td>
+                        <td className={`py-4 px-4 font-medium ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{log.sensor}</td>
+                        <td className="py-4 px-4 text-center font-bold text-red-500">
+                          {log.value.toFixed(1)}{log.sensor.toLowerCase().includes('hum') ? '%' : '°C'}
+                        </td>
+                        <td className={`py-4 px-4 text-center font-mono text-xs ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                          {log.sensor.toLowerCase().includes('hum') 
+                            ? `< ${log.limit_value}%` 
+                            : `${log.limit_value === 40.0 ? '10 - 40°C' : log.limit_value + '°C'}`}
+                        </td>
+                        <td className={`py-4 px-4 ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>
+                          {log.message}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        {alertLogs.length === 0 ? (
-          <p className={`text-sm text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
-            ไม่มีประวัติการแจ้งเตือนภัยในระบบ
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left border-collapse">
-              <thead>
-                <tr className={`border-b ${isDarkMode ? 'border-slate-800 text-gray-400' : 'border-slate-200 text-slate-500'} text-xs font-semibold uppercase tracking-wider`}>
-                  <th className="py-3 px-4">วัน-เวลา</th>
-                  <th className="py-3 px-4">ห้อง</th>
-                  <th className="py-3 px-4">เซนเซอร์</th>
-                  <th className="py-3 px-4 text-center">ค่าที่วัดได้</th>
-                  <th className="py-3 px-4 text-center">เกณฑ์ความปลอดภัย</th>
-                  <th className="py-3 px-4">รายละเอียด</th>
-                </tr>
-              </thead>
-              <tbody>
-                {alertLogs.map((log) => {
-                  const alertDate = new Date(log.timestamp);
-                  const timeStr = isNaN(alertDate.getTime()) 
-                    ? log.timestamp 
-                    : alertDate.toLocaleString('th-TH', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                      });
+        {/* Email Recipients Section (Right 1/3) */}
+        <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 flex flex-col`}>
+          <h2 className={`text-xl font-semibold mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+            <Mail className="text-blue-500" size={24} />
+            อีเมลผู้รับแจ้งเตือน (Recipients)
+          </h2>
+          
+          <form onSubmit={handleAddEmail} className="flex gap-2 mb-6">
+            <input
+              type="email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="กรอกอีเมลใหม่..."
+              className={`theme-input ${isDarkMode ? 'dark' : 'light'} flex-grow text-sm py-2`}
+              required
+            />
+            <button
+              type="submit"
+              className={`theme-btn ${isDarkMode ? 'dark' : 'light'} py-2 px-3 flex items-center gap-1 text-sm font-semibold`}
+            >
+              <Plus size={16} />
+              เพิ่ม
+            </button>
+          </form>
 
-                  const isCleanroom = log.room === 'cleanroom';
-                  const roomBadgeColor = isCleanroom 
-                    ? 'bg-red-500/10 text-red-500 border-red-500/20'
-                    : 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-
-                  return (
-                    <tr 
-                      key={log.id} 
-                      className={`border-b ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/20' : 'border-slate-100 hover:bg-slate-50/50'} transition-colors`}
-                    >
-                      <td className={`py-4 px-4 font-mono text-xs ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>{timeStr}</td>
-                      <td className="py-4 px-4">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roomBadgeColor}`}>
-                          {isCleanroom ? 'Cleanroom' : 'Fablab'}
-                        </span>
-                      </td>
-                      <td className={`py-4 px-4 font-medium ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{log.sensor}</td>
-                      <td className="py-4 px-4 text-center font-bold text-red-500">
-                        {log.value.toFixed(1)}{log.sensor.toLowerCase().includes('hum') ? '%' : '°C'}
-                      </td>
-                      <td className={`py-4 px-4 text-center font-mono text-xs ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
-                        {log.sensor.toLowerCase().includes('hum') 
-                          ? `< ${log.limit_value}%` 
-                          : `${log.limit_value === 40.0 ? '10 - 40°C' : log.limit_value + '°C'}`}
-                      </td>
-                      <td className={`py-4 px-4 ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>
-                        {log.message}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+          {recipientEmails.length === 0 ? (
+            <p className={`text-sm text-center py-6 my-auto ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+              ไม่มีอีเมลผู้รับแจ้งเตือนที่ลงทะเบียนไว้
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2 overflow-y-auto max-h-[350px] pr-1">
+              {recipientEmails.map((email) => (
+                <div 
+                  key={email}
+                  className={`flex justify-between items-center p-3 rounded-lg border ${
+                    isDarkMode 
+                      ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/70' 
+                      : 'bg-slate-50 border-slate-200/60 hover:bg-slate-100/60'
+                  } transition-colors`}
+                >
+                  <span className={`text-sm font-mono truncate ${isDarkMode ? 'text-gray-200' : 'text-slate-700'}`} title={email}>
+                    {email}
+                  </span>
+                  <button
+                    onClick={() => handleRemoveEmail(email)}
+                    className="text-red-500 hover:text-red-600 hover:bg-red-500/10 p-1.5 rounded-lg transition-colors"
+                    title="ลบอีเมลออก"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

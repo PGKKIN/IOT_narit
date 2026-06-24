@@ -5,7 +5,7 @@ import time
 import sys
 
 # ---- Configuration ----
-COM_PORT = "COM4"  # เปลี่ยนตรงนี้ให้ตรงกับเลข COM Port ของ ESP32
+COM_PORT = "COM6"  # เปลี่ยนตรงนี้ให้ตรงกับเลข COM Port ของ ESP32
 BAUD_RATE = 115200
 API_URL = "http://127.0.0.1:8000/log/cleanroom"
 

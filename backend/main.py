@@ -38,7 +38,7 @@ config = {
     "smtp_port": 465,
     "smtp_email": "copphotonicchip@gmail.com",
     "smtp_password": "YOUR_GMAIL_APP_PASSWORD_HERE",
-    "recipient_email": "copphotonicchip@gmail.com",
+    "recipient_emails": ["copphotonicchip@gmail.com"],
     "humidity_threshold_cleanroom": 60.0,
     "humidity_threshold_fablab": 65.0,
     "alert_cooldown_minutes": 30,
@@ -48,7 +48,26 @@ config = {
 if os.path.exists(CONFIG_PATH):
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            config.update(json.load(f))
+            loaded_config = json.load(f)
+        
+        # Migrate singular recipient_email if present
+        if "recipient_emails" not in loaded_config:
+            if "recipient_email" in loaded_config:
+                loaded_config["recipient_emails"] = [loaded_config["recipient_email"]]
+            else:
+                loaded_config["recipient_emails"] = ["copphotonicchip@gmail.com"]
+            
+            # Save migrated config back to file
+            try:
+                temp_full = {}
+                temp_full.update(config)
+                temp_full.update(loaded_config)
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(temp_full, f, indent=2)
+            except Exception as e:
+                print(f"Error saving migrated config.json: {e}")
+        
+        config.update(loaded_config)
         print("[Config] SMTP and alert configurations loaded successfully.")
     except Exception as e:
         print(f"Error loading config.json: {e}")
@@ -64,15 +83,20 @@ def send_email_sync(subject: str, body: str):
         return
         
     try:
+        recipients = config.get("recipient_emails", [])
+        if not recipients:
+            print("[SMTP] Email skipped: No recipients configured in config.json.")
+            return
+
         msg = MIMEMultipart()
         msg['From'] = config["smtp_email"]
-        msg['To'] = config["recipient_email"]
+        msg['To'] = ", ".join(recipients)
         msg['Subject'] = Header(subject, 'utf-8')
         msg.attach(MIMEText(body, 'html', 'utf-8'))
         
         server = smtplib.SMTP_SSL(config["smtp_server"], config["smtp_port"])
         server.login(config["smtp_email"], config["smtp_password"])
-        server.sendmail(config["smtp_email"], config["recipient_email"], msg.as_string())
+        server.sendmail(config["smtp_email"], recipients, msg.as_string())
         server.close()
         print("[SMTP] Email successfully sent.")
     except Exception as e:
@@ -502,6 +526,43 @@ def clear_alert_logs(db: Session = Depends(get_db)):
     db.query(models.AlertLog).delete()
     db.commit()
     return {"message": "Alert logs cleared successfully"}
+
+@app.get("/config/emails")
+def get_recipient_emails():
+    return config.get("recipient_emails", [])
+
+@app.post("/config/emails")
+def add_recipient_email(req: schemas.EmailUpdateRequest):
+    email = req.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+        
+    emails = config.get("recipient_emails", [])
+    if email not in emails:
+        emails.append(email)
+        config["recipient_emails"] = emails
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
+    return emails
+
+@app.delete("/config/emails")
+def remove_recipient_email(email: str = Query(...)):
+    email = email.strip().lower()
+    emails = config.get("recipient_emails", [])
+    if email in emails:
+        emails.remove(email)
+        config["recipient_emails"] = emails
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
+    return emails
 
 @app.post("/log/{room}")
 async def log_data(room: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):

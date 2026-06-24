@@ -1,6 +1,8 @@
+import os
 import sys
-sys.path.append(r"c:\my_work\IOT_sensor\backend")
-
+# ดึงตำแหน่งโฟลเดอร์ backend อิงตามตำแหน่งปัจจุบันของสคริปต์นี้
+backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend")
+sys.path.append(backend_path)
 from database import SessionLocal
 import models
 from main import send_daily_summary, check_cleanroom_alerts

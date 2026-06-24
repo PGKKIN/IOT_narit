@@ -39,3 +39,6 @@ class AlertLogResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class EmailUpdateRequest(BaseModel):
+    email: str

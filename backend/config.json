@@ -1,11 +1,15 @@
 {
   "smtp_server": "smtp.gmail.com",
   "smtp_port": 465,
-  "smtp_email": "kandanaikid@gmail.com",
-  "smtp_password": "bsmo pwtb mxmx qrnc",
-  "recipient_email": "kandanaikid@gmail.com",
+  "smtp_email": "copphotonicchip@gmail.com",
+  "smtp_password": "ajlv dgqh cqql ueiq",
+  "recipient_emails": [
+    "kandanai@narit.or.th",
+    "jirayu@narit.or.th"
+  ],
   "humidity_threshold_cleanroom": 60.0,
   "humidity_threshold_fablab": 65.0,
   "alert_cooldown_minutes": 30,
-  "daily_summary_time": "10:25"
+  "daily_summary_time": "09:00",
+  "recipient_email": "copphotonicchip@gmail.com"
 }
