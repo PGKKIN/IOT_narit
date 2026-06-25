@@ -102,7 +102,7 @@ const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDa
         </div>
       </div>
       <div className="flex items-end gap-2">
-        <span className={`text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{value !== null ? value : '--'}</span>
+        <span className={`text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{value != null ? value : '--'}</span>
         <span className={`${isDarkMode ? 'text-gray-400' : 'text-slate-500'} mb-1`}>{unit}</span>
       </div>
       {subtitle && (
@@ -125,6 +125,25 @@ const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDa
 };
 
 const CustomTooltip = ({ active, payload, label, isDarkMode }) => {
+  const formatValue = (val, name) => {
+    if (val === null || val === undefined) return '--';
+    if (Array.isArray(val)) {
+      const min = Number(val[0]);
+      const max = Number(val[1]);
+      if (isNaN(min) || isNaN(max)) return '--';
+      if (name && (name.toLowerCase().includes('co2') || name.toLowerCase().includes('tvoc'))) {
+        return `${min.toFixed(0)} - ${max.toFixed(0)}`;
+      }
+      return `${min.toFixed(1)} - ${max.toFixed(1)}`;
+    }
+    const num = Number(val);
+    if (isNaN(num)) return val;
+    if (name && (name.toLowerCase().includes('co2') || name.toLowerCase().includes('tvoc'))) {
+      return num.toFixed(0);
+    }
+    return num.toFixed(1);
+  };
+
   if (active && payload && payload.length) {
     return (
       <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-4 max-w-xs shadow-xl`}>
@@ -133,7 +152,9 @@ const CustomTooltip = ({ active, payload, label, isDarkMode }) => {
           <div key={index} className="flex items-center gap-2 mb-1 text-sm">
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className={isDarkMode ? 'text-gray-400' : 'text-slate-500'}>{entry.name}:</span>
-            <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{entry.value}</span>
+            <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+              {formatValue(entry.value, entry.name)}
+            </span>
           </div>
         ))}
       </div>
