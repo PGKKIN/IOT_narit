@@ -991,7 +991,11 @@ def get_data_history(
         results = db.query(
             time_bucket,
             func.avg(model.temperature).label("temperature"),
+            func.min(model.temperature).label("min_temp"),
+            func.max(model.temperature).label("max_temp"),
             func.avg(model.humidity).label("humidity"),
+            func.min(model.humidity).label("min_hum"),
+            func.max(model.humidity).label("max_hum"),
             func.avg(model.eco2).label("eco2"),
             func.avg(model.tvoc).label("tvoc")
         ).filter(
@@ -1003,7 +1007,11 @@ def get_data_history(
             {
                 "timestamp": row.time_bucket,
                 "temperature": round(row.temperature, 2) if row.temperature else 0,
+                "min_temp": round(row.min_temp, 2) if row.min_temp else 0,
+                "max_temp": round(row.max_temp, 2) if row.max_temp else 0,
                 "humidity": round(row.humidity, 2) if row.humidity else 0,
+                "min_hum": round(row.min_hum, 2) if row.min_hum else 0,
+                "max_hum": round(row.max_hum, 2) if row.max_hum else 0,
                 "eco2": round(row.eco2, 0) if row.eco2 else 0,
                 "tvoc": round(row.tvoc, 0) if row.tvoc else 0
             } for row in results if row.time_bucket is not None
@@ -1012,7 +1020,11 @@ def get_data_history(
         results = db.query(
             time_bucket,
             func.avg(model.dht_temp).label("dht_temp"),
+            func.min(model.dht_temp).label("min_dht_temp"),
+            func.max(model.dht_temp).label("max_dht_temp"),
             func.avg(model.dht_hum).label("dht_hum"),
+            func.min(model.dht_hum).label("min_dht_hum"),
+            func.max(model.dht_hum).label("max_dht_hum"),
             func.avg(model.ds1_temp).label("ds1_temp"),
             func.avg(model.ds2_temp).label("ds2_temp"),
             func.avg(model.ds3_temp).label("ds3_temp")
@@ -1025,7 +1037,11 @@ def get_data_history(
             {
                 "timestamp": row.time_bucket,
                 "dht_temp": round(row.dht_temp, 2) if row.dht_temp else 0,
+                "min_dht_temp": round(row.min_dht_temp, 2) if row.min_dht_temp else 0,
+                "max_dht_temp": round(row.max_dht_temp, 2) if row.max_dht_temp else 0,
                 "dht_hum": round(row.dht_hum, 2) if row.dht_hum else 0,
+                "min_dht_hum": round(row.min_dht_hum, 2) if row.min_dht_hum else 0,
+                "max_dht_hum": round(row.max_dht_hum, 2) if row.max_dht_hum else 0,
                 "ds1_temp": round(row.ds1_temp, 2) if row.ds1_temp else 0,
                 "ds2_temp": round(row.ds2_temp, 2) if row.ds2_temp else 0,
                 "ds3_temp": round(row.ds3_temp, 2) if row.ds3_temp else 0

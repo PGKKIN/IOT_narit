@@ -171,6 +171,7 @@ const App = () => {
   const dragStartLimitsRef = useRef({});
   const activeDragChartRef = useRef(null);
   const isDraggingRef = useRef(false);
+  const dragDirectionRef = useRef(null); // 'horizontal', 'vertical', or null
 
   // Theme, Filter, Clock States
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -183,6 +184,8 @@ const App = () => {
   const [zoomStart, setZoomStart] = useState(null);
   const [zoomEnd, setZoomEnd] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [brushKey, setBrushKey] = useState(0);
+  const isDraggingBrushRef = useRef(false);
 
   // Event Listener refs for Scroll Zoom
   const fablabTempChartRef = useRef(null);
@@ -305,7 +308,11 @@ const App = () => {
             
         return {
           ...item,
-          displayTime
+          displayTime,
+          tempRange: [item.min_temp ?? item.temperature, item.max_temp ?? item.temperature],
+          humRange: [item.min_hum ?? item.humidity, item.max_hum ?? item.humidity],
+          dhtTempRange: [item.min_dht_temp ?? item.dht_temp, item.max_dht_temp ?? item.dht_temp],
+          dhtHumRange: [item.min_dht_hum ?? item.dht_hum, item.max_dht_hum ?? item.dht_hum]
         };
       });
       setHistoryData(formattedData);
@@ -334,14 +341,24 @@ const App = () => {
   }, [activeTab, lastUpdated, timeRange, startTime, endTime, resolution]);
 
   useEffect(() => {
+    setZoomStart(null);
+    setZoomEnd(null);
     fetchHistoryData();
   }, [timeRange, activeTab, startTime, endTime, resolution]);
 
   // Sync zoom boundaries on history update
   useEffect(() => {
     if (historyData.length > 0) {
-      setZoomStart(0);
-      setZoomEnd(historyData.length - 1);
+      if (zoomStart === null || zoomEnd === null) {
+        setZoomStart(0);
+        setZoomEnd(historyData.length - 1);
+      } else {
+        setZoomEnd(prevEnd => {
+          if (prevEnd === null) return historyData.length - 1;
+          return Math.min(historyData.length - 1, prevEnd);
+        });
+      }
+      setBrushKey(prev => prev + 1);
     } else {
       setZoomStart(null);
       setZoomEnd(null);
@@ -403,6 +420,7 @@ const App = () => {
           const newEnd = Math.max(zStart + 5, zEnd - zoomAmount);
           setZoomStart(newStart);
           setZoomEnd(newEnd);
+          setBrushKey(prev => prev + 1);
         }
       } else {
         // Scroll Down: Zoom Out
@@ -410,6 +428,7 @@ const App = () => {
         const newEnd = Math.min(hData.length - 1, zEnd + zoomAmount);
         setZoomStart(newStart);
         setZoomEnd(newEnd);
+        setBrushKey(prev => prev + 1);
       }
     };
 
@@ -435,11 +454,13 @@ const App = () => {
   const handleChartMouseDown = (e, chartType) => {
     if (e) {
       e.preventDefault();
+      e.stopPropagation();
       setIsDragging(true);
       isDraggingRef.current = true;
       dragStartXRef.current = e.clientX ?? e.nativeEvent?.clientX;
       dragStartYRef.current = e.clientY ?? e.nativeEvent?.clientY;
       activeDragChartRef.current = chartType;
+      dragDirectionRef.current = null;
 
       const state = dragStateRef.current;
       dragStartLimitsRef.current = {
@@ -472,8 +493,21 @@ const App = () => {
           const limits = dragStartLimitsRef.current;
           const { historyData: hData } = zoomStateRef.current;
 
+          // Establish direction lock
+          if (dragDirectionRef.current === null) {
+            const totalX = Math.abs(diffX);
+            const totalY = Math.abs(diffY);
+            if (totalX > 5 || totalY > 5) {
+              if (totalX > totalY) {
+                dragDirectionRef.current = 'horizontal';
+              } else {
+                dragDirectionRef.current = 'vertical';
+              }
+            }
+          }
+
           // 1. Horizontal timeline panning
-          if (limits.zoomStart !== null && limits.zoomEnd !== null && hData && hData.length > 0) {
+          if (dragDirectionRef.current === 'horizontal' && limits.zoomStart !== null && limits.zoomEnd !== null && hData && hData.length > 0) {
             const currentRange = limits.zoomEnd - limits.zoomStart;
             const dragPercentageX = diffX / width;
             const shiftX = -Math.round(dragPercentageX * currentRange);
@@ -494,7 +528,7 @@ const App = () => {
           }
 
           // 2. Vertical Y-axis bounds panning
-          if (Math.abs(diffY) > 2) {
+          if (dragDirectionRef.current === 'vertical') {
             if (activeDragChartRef.current === 'temp') {
               const range = limits.tempMax - limits.tempMin;
               const shiftY = (diffY / height) * range;
@@ -528,6 +562,12 @@ const App = () => {
         dragStartXRef.current = null;
         dragStartYRef.current = null;
         activeDragChartRef.current = null;
+        dragDirectionRef.current = null;
+        setBrushKey(prev => prev + 1);
+      }
+      if (isDraggingBrushRef.current) {
+        isDraggingBrushRef.current = false;
+        setBrushKey(prev => prev + 1);
       }
     };
 
@@ -620,6 +660,7 @@ const App = () => {
     ];
   };
 
+  const zoomedData = historyData.slice(zoomStart ?? 0, (zoomEnd ?? historyData.length - 1) + 1);
 
   return (
     <div className={`theme-bg ${isDarkMode ? 'dark' : 'light'}`}>
@@ -689,25 +730,7 @@ const App = () => {
             />
           </div>
 
-          {/* Resolution */}
-          <div className="flex flex-col gap-1 w-full md:w-auto">
-            <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-              <Sliders size={12} /> Resolution
-            </span>
-            <select
-              value={resolution}
-              onChange={(e) => setResolution(parseInt(e.target.value))}
-              className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full md:w-36`}
-            >
-              <option value={0}>Auto</option>
-              <option value={1}>1 Minute</option>
-              <option value={3}>3 Minutes</option>
-              <option value={5}>5 Minutes</option>
-              <option value={10}>10 Minutes</option>
-              <option value={30}>30 Minutes</option>
-              <option value={60}>1 Hour</option>
-            </select>
-          </div>
+
         </div>
 
         <div className="flex gap-3 w-full md:w-auto justify-end">
@@ -953,13 +976,13 @@ const App = () => {
               </div>
               <div 
                 ref={fablabTempChartRef} 
-                className="h-[380px] w-full select-none"
+                className="h-[330px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart 
-                    data={historyData} 
-                    margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
+                    data={zoomedData} 
+                    margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <defs>
                       <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
@@ -979,8 +1002,19 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
+                    <Area type="monotone" dataKey="tempRange" stroke="none" fill="#3b82f6" fillOpacity={0.12} name="Temp Range (°C)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="temperature" name="Temp (°C)" stroke="#3b82f6" strokeWidth={3} fill="url(#colorTemp)" dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(59, 130, 246, 0.35))' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[40px] w-full select-none mt-2" onMouseDown={() => { isDraggingBrushRef.current = true; }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
+                    <XAxis dataKey="displayTime" hide />
+                    <YAxis hide />
+                    <Area type="monotone" dataKey="temperature" stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#3b82f6" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
                     <Brush 
+                      key={`brush-${brushKey}`}
                       dataKey="displayTime" 
                       height={20} 
                       stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} 
@@ -1017,13 +1051,13 @@ const App = () => {
               </div>
               <div 
                 ref={fablabHumChartRef} 
-                className="h-[380px] w-full select-none"
+                className="h-[330px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart 
-                    data={historyData} 
-                    margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
+                    data={zoomedData} 
+                    margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <defs>
                       <linearGradient id="colorHum" x1="0" y1="0" x2="0" y2="1">
@@ -1043,8 +1077,19 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
+                    <Area type="monotone" dataKey="humRange" stroke="none" fill="#10b981" fillOpacity={0.12} name="Humidity Range (%)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[40px] w-full select-none mt-2" onMouseDown={() => { isDraggingBrushRef.current = true; }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
+                    <XAxis dataKey="displayTime" hide />
+                    <YAxis hide />
+                    <Area type="monotone" dataKey="humidity" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#10b981" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
                     <Brush 
+                      key={`brush-${brushKey}`}
                       dataKey="displayTime" 
                       height={20} 
                       stroke={isDarkMode ? "#10b981" : "#cbd5e1"} 
@@ -1081,13 +1126,13 @@ const App = () => {
               </div>
               <div 
                 ref={fablabAqChartRef} 
-                className="h-[380px] w-full select-none"
+                className="h-[330px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart 
-                    data={historyData} 
-                    margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
+                    data={zoomedData} 
+                    margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <defs>
                       <linearGradient id="colorCO2" x1="0" y1="0" x2="0" y2="1">
@@ -1124,7 +1169,17 @@ const App = () => {
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
                     <Area yAxisId="left" type="monotone" dataKey="eco2" name="eCO2 (ppm)" stroke="#10b981" strokeWidth={3} fill="url(#colorCO2)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.3))' }} />
                     <Area yAxisId="right" type="monotone" dataKey="tvoc" name="TVOC (ppb)" stroke="#f59e0b" strokeWidth={3} fill="url(#colorTVOC)" dot={false} activeDot={{ r: 6, fill: '#f59e0b', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(245, 158, 11, 0.3))' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[40px] w-full select-none mt-2" onMouseDown={() => { isDraggingBrushRef.current = true; }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
+                    <XAxis dataKey="displayTime" hide />
+                    <YAxis hide />
+                    <Area type="monotone" dataKey="eco2" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#10b981" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
                     <Brush 
+                      key={`brush-${brushKey}`}
                       dataKey="displayTime" 
                       height={20} 
                       stroke={isDarkMode ? "#10b981" : "#cbd5e1"} 
@@ -1175,13 +1230,13 @@ const App = () => {
               </div>
               <div 
                 ref={cleanroomTempChartRef} 
-                className="h-[380px] w-full select-none"
+                className="h-[330px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart 
-                    data={historyData} 
-                    margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
+                    data={zoomedData} 
+                    margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
@@ -1195,11 +1250,22 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
+                    <Area type="monotone" dataKey="dhtTempRange" stroke="none" fill="#3b82f6" fillOpacity={0.10} name="Ambient Temp Range (°C)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Line type="monotone" dataKey="dht_temp" name="DHT Ambient Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(59, 130, 246, 0.35))' }} />
                     <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(34, 211, 238, 0.35))' }} />
                     <Line type="monotone" dataKey="ds2_temp" name="Optical Table 1 (°C)" stroke="#06b6d4" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#06b6d4', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(6, 182, 212, 0.35))' }} />
                     <Line type="monotone" dataKey="ds3_temp" name="Optical Table 2 (°C)" stroke="#0891b2" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#0891b2', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(8, 145, 178, 0.35))' }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[40px] w-full select-none mt-2" onMouseDown={() => { isDraggingBrushRef.current = true; }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
+                    <XAxis dataKey="displayTime" hide />
+                    <YAxis hide />
+                    <Area type="monotone" dataKey="dht_temp" stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#3b82f6" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
                     <Brush 
+                      key={`brush-${brushKey}`}
                       dataKey="displayTime" 
                       height={20} 
                       stroke={isDarkMode ? "#3b82f6" : "#cbd5e1"} 
@@ -1211,7 +1277,7 @@ const App = () => {
                         setZoomEnd(obj.endIndex);
                       }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
@@ -1236,13 +1302,13 @@ const App = () => {
               </div>
               <div 
                 ref={cleanroomHumChartRef} 
-                className="h-[380px] w-full select-none"
+                className="h-[330px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart 
-                    data={historyData} 
-                    margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
+                    data={zoomedData} 
+                    margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <defs>
                       <linearGradient id="colorCleanHum" x1="0" y1="0" x2="0" y2="1">
@@ -1262,8 +1328,19 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
+                    <Area type="monotone" dataKey="dhtHumRange" stroke="none" fill="#10b981" fillOpacity={0.12} name="Humidity Range (%)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorCleanHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="h-[40px] w-full select-none mt-2" onMouseDown={() => { isDraggingBrushRef.current = true; }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
+                    <XAxis dataKey="displayTime" hide />
+                    <YAxis hide />
+                    <Area type="monotone" dataKey="dht_hum" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#10b981" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
                     <Brush 
+                      key={`brush-${brushKey}`}
                       dataKey="displayTime" 
                       height={20} 
                       stroke={isDarkMode ? "#10b981" : "#cbd5e1"} 
