@@ -3,6 +3,8 @@ import axios from 'axios';
 import { 
   LineChart, 
   Line, 
+  AreaChart,
+  Area,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -58,10 +60,38 @@ const getTVOCStatus = (value) => {
   return { theme: colorMap.blue, alert: null };
 };
 
+const themeGlows = {
+  'text-blue-500': 'rgba(59, 130, 246, 0.12)',
+  'text-emerald-500': 'rgba(16, 185, 129, 0.12)',
+  'text-yellow-500': 'rgba(245, 158, 11, 0.12)',
+  'text-orange-500': 'rgba(249, 115, 22, 0.12)',
+  'text-red-500': 'rgba(239, 68, 68, 0.12)',
+  'text-purple-500': 'rgba(168, 85, 247, 0.12)',
+  'text-cyan-500': 'rgba(6, 182, 212, 0.12)',
+};
+
+const themeBorders = {
+  'text-blue-500': 'rgba(59, 130, 246, 0.4)',
+  'text-emerald-500': 'rgba(16, 185, 129, 0.4)',
+  'text-yellow-500': 'rgba(245, 158, 11, 0.4)',
+  'text-orange-500': 'rgba(249, 115, 22, 0.4)',
+  'text-red-500': 'rgba(239, 68, 68, 0.4)',
+  'text-purple-500': 'rgba(168, 85, 247, 0.4)',
+  'text-cyan-500': 'rgba(6, 182, 212, 0.4)',
+};
+
 const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDarkMode }) => {
   const t = theme || colorMap.blue;
+  const glowColor = themeGlows[t.icon] || 'rgba(59, 130, 246, 0.12)';
+  const borderColor = themeBorders[t.icon] || 'rgba(51, 65, 85, 0.8)';
   return (
-    <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 flex flex-col relative overflow-hidden group border-t-4 border-t-transparent hover:border-t-current ${t.text}`}>
+    <div 
+      className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 flex flex-col relative overflow-hidden group border-t-4 border-t-transparent hover:border-t-current ${t.text}`}
+      style={{
+        '--card-glow-color': glowColor,
+        '--card-border-color': borderColor,
+      }}
+    >
       <div className="absolute -right-6 -top-6 opacity-10 group-hover:scale-110 transition-transform duration-300">
         <Icon size={100} className={t.icon} />
       </div>
@@ -118,6 +148,7 @@ const App = () => {
   const [historyData, setHistoryData] = useState([]);
   const [timeRange, setTimeRange] = useState('24h');
   const [isOnline, setIsOnline] = useState(false);
+  const [isSensorActive, setIsSensorActive] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [alertLogs, setAlertLogs] = useState([]);
   const [recipientEmails, setRecipientEmails] = useState([]);
@@ -237,11 +268,13 @@ const App = () => {
       setLatestData(response.data);
       setIsOnline(true);
       setLastUpdated(new Date());
+      
+      const isActive = response.headers['x-sensor-active'] === 'true';
+      setIsSensorActive(isActive);
     } catch (error) {
       console.error("Error fetching latest data", error);
-      if (lastUpdated && (new Date() - lastUpdated) > 30000) {
-        setIsOnline(false);
-      }
+      setIsOnline(false);
+      setIsSensorActive(false);
     }
   };
 
@@ -598,8 +631,15 @@ const App = () => {
             Lab Monitoring System
           </h1>
           <div className="flex flex-wrap items-center text-sm gap-2 opacity-80 text-gray-400">
-            <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
-            <span className={isDarkMode ? 'text-gray-300' : 'text-slate-600'}>{isOnline ? 'System Online' : 'System Offline'}</span>
+            <div className="relative flex h-2.5 w-2.5 mr-1.5">
+              {isSensorActive && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              )}
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isSensorActive ? 'bg-emerald-500' : isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></span>
+            </div>
+            <span className={isDarkMode ? 'text-gray-300' : 'text-slate-600'}>
+              {isSensorActive ? 'Sensor Connected' : 'Sensor Disconnected'}
+            </span>
             <span className="mx-1 text-slate-500">•</span>
             <Clock size={14} />
             <span className={isDarkMode ? 'text-gray-300' : 'text-slate-600'}>Last Updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : '--:--:--'}</span>
@@ -846,29 +886,39 @@ const App = () => {
       </div>
 
       {/* Tabs */}
-      <div className={`flex gap-4 mb-8 border-b ${isDarkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-        <button
-          className={`pb-4 px-2 font-medium flex items-center gap-2 transition-colors ${
-            activeTab === 'fablab' 
-              ? 'text-blue-500 border-b-2 border-blue-500' 
-              : isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-slate-500 hover:text-slate-800'
-          }`}
-          onClick={() => setActiveTab('fablab')}
-        >
-          <Server size={18} />
-          Fablab Monitor
-        </button>
-        <button
-          className={`pb-4 px-2 font-medium flex items-center gap-2 transition-colors ${
-            activeTab === 'cleanroom' 
-              ? 'text-blue-500 border-b-2 border-blue-500' 
-              : isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-slate-500 hover:text-slate-800'
-          }`}
-          onClick={() => setActiveTab('cleanroom')}
-        >
-          <Cpu size={18} />
-          Cleanroom Monitor
-        </button>
+      <div className="flex mb-8">
+        <div className={`inline-flex p-1 rounded-xl backdrop-blur-md border transition-all duration-300 ${
+          isDarkMode 
+            ? 'bg-slate-950/40 border-slate-800/50' 
+            : 'bg-slate-100/50 border-slate-200/50'
+        }`}>
+          <button
+            className={`py-2 px-5 font-semibold flex items-center gap-2 rounded-lg transition-all duration-300 text-sm ${
+              activeTab === 'fablab' 
+                ? isDarkMode 
+                  ? 'bg-slate-800/90 text-blue-400 border border-slate-700/50 shadow-lg shadow-blue-500/5'
+                  : 'bg-white text-blue-600 border border-slate-200/80 shadow-md'
+                : isDarkMode ? 'text-gray-400 hover:text-gray-200 border border-transparent' : 'text-slate-500 hover:text-slate-800 border border-transparent'
+            }`}
+            onClick={() => setActiveTab('fablab')}
+          >
+            <Server size={16} />
+            Fablab Monitor
+          </button>
+          <button
+            className={`py-2 px-5 font-semibold flex items-center gap-2 rounded-lg transition-all duration-300 text-sm ${
+              activeTab === 'cleanroom' 
+                ? isDarkMode 
+                  ? 'bg-slate-800/90 text-blue-400 border border-slate-700/50 shadow-lg shadow-blue-500/5'
+                  : 'bg-white text-blue-600 border border-slate-200/80 shadow-md'
+                : isDarkMode ? 'text-gray-400 hover:text-gray-200 border border-transparent' : 'text-slate-500 hover:text-slate-800 border border-transparent'
+            }`}
+            onClick={() => setActiveTab('cleanroom')}
+          >
+            <Cpu size={16} />
+            Cleanroom Monitor
+          </button>
+        </div>
       </div>
 
       {activeTab === 'fablab' ? (
@@ -885,17 +935,38 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Temperature Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Temperature History</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Temperature History</h3>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
+                    💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
+                  </p>
+                </div>
+                {(tempYMin !== '' || tempYMax !== '') && (
+                  <button 
+                    onClick={() => { setTempYMin(''); setTempYMax(''); }}
+                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                  >
+                    Reset View
+                  </button>
+                )}
+              </div>
               <div 
                 ref={fablabTempChartRef} 
                 className="h-[380px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
+                  <AreaChart 
                     data={historyData} 
                     margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
                   >
+                    <defs>
+                      <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis 
@@ -908,7 +979,7 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Line type="monotone" dataKey="temperature" name="Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="temperature" name="Temp (°C)" stroke="#3b82f6" strokeWidth={3} fill="url(#colorTemp)" dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(59, 130, 246, 0.35))' }} />
                     <Brush 
                       dataKey="displayTime" 
                       height={20} 
@@ -921,24 +992,45 @@ const App = () => {
                         setZoomEnd(obj.endIndex);
                       }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
             {/* Humidity Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Humidity History</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Humidity History</h3>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
+                    💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
+                  </p>
+                </div>
+                {(humYMin !== '' || humYMax !== '') && (
+                  <button 
+                    onClick={() => { setHumYMin(''); setHumYMax(''); }}
+                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                  >
+                    Reset View
+                  </button>
+                )}
+              </div>
               <div 
                 ref={fablabHumChartRef} 
                 className="h-[380px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
+                  <AreaChart 
                     data={historyData} 
                     margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
                   >
+                    <defs>
+                      <linearGradient id="colorHum" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis 
@@ -951,7 +1043,7 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Line type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                     <Brush 
                       dataKey="displayTime" 
                       height={20} 
@@ -964,24 +1056,49 @@ const App = () => {
                         setZoomEnd(obj.endIndex);
                       }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
             {/* Air Quality (eCO2 & TVOC) Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 lg:col-span-2`}>
-              <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Air Quality (eCO2 & TVOC)</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Air Quality (eCO2 & TVOC)</h3>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
+                    💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
+                  </p>
+                </div>
+                {(co2YMin !== '' || co2YMax !== '' || tvocYMin !== '' || tvocYMax !== '') && (
+                  <button 
+                    onClick={() => { setCo2YMin(''); setCo2YMax(''); setTvocYMin(''); setTvocYMax(''); }}
+                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                  >
+                    Reset View
+                  </button>
+                )}
+              </div>
               <div 
                 ref={fablabAqChartRef} 
                 className="h-[380px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
+                  <AreaChart 
                     data={historyData} 
                     margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
                   >
+                    <defs>
+                      <linearGradient id="colorCO2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorTVOC" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis 
@@ -1005,8 +1122,8 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Line yAxisId="left" type="monotone" dataKey="eco2" name="eCO2 (ppm)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="tvoc" name="TVOC (ppb)" stroke="#f59e0b" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#f59e0b', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+                    <Area yAxisId="left" type="monotone" dataKey="eco2" name="eCO2 (ppm)" stroke="#10b981" strokeWidth={3} fill="url(#colorCO2)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.3))' }} />
+                    <Area yAxisId="right" type="monotone" dataKey="tvoc" name="TVOC (ppb)" stroke="#f59e0b" strokeWidth={3} fill="url(#colorTVOC)" dot={false} activeDot={{ r: 6, fill: '#f59e0b', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(245, 158, 11, 0.3))' }} />
                     <Brush 
                       dataKey="displayTime" 
                       height={20} 
@@ -1019,7 +1136,7 @@ const App = () => {
                         setZoomEnd(obj.endIndex);
                       }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
@@ -1040,7 +1157,22 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Cleanroom Temperatures */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Temperatures</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Temperatures</h3>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
+                    💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
+                  </p>
+                </div>
+                {(tempYMin !== '' || tempYMax !== '') && (
+                  <button 
+                    onClick={() => { setTempYMin(''); setTempYMax(''); }}
+                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                  >
+                    Reset View
+                  </button>
+                )}
+              </div>
               <div 
                 ref={cleanroomTempChartRef} 
                 className="h-[380px] w-full select-none"
@@ -1063,10 +1195,10 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Line type="monotone" dataKey="dht_temp" name="DHT Ambient Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="ds2_temp" name="Optical Table 1 (°C)" stroke="#06b6d4" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#06b6d4', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="ds3_temp" name="Optical Table 2 (°C)" stroke="#0891b2" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#0891b2', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="dht_temp" name="DHT Ambient Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(59, 130, 246, 0.35))' }} />
+                    <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(34, 211, 238, 0.35))' }} />
+                    <Line type="monotone" dataKey="ds2_temp" name="Optical Table 1 (°C)" stroke="#06b6d4" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#06b6d4', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(6, 182, 212, 0.35))' }} />
+                    <Line type="monotone" dataKey="ds3_temp" name="Optical Table 2 (°C)" stroke="#0891b2" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#0891b2', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(8, 145, 178, 0.35))' }} />
                     <Brush 
                       dataKey="displayTime" 
                       height={20} 
@@ -1086,17 +1218,38 @@ const App = () => {
 
             {/* Cleanroom Humidity */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <h3 className={`text-lg font-medium mb-6 ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Humidity</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Humidity</h3>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
+                    💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
+                  </p>
+                </div>
+                {(humYMin !== '' || humYMax !== '') && (
+                  <button 
+                    onClick={() => { setHumYMin(''); setHumYMax(''); }}
+                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                  >
+                    Reset View
+                  </button>
+                )}
+              </div>
               <div 
                 ref={cleanroomHumChartRef} 
                 className="h-[380px] w-full select-none"
                 style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
+                  <AreaChart 
                     data={historyData} 
                     margin={{ top: 10, right: 10, left: 20, bottom: 10 }}
                   >
+                    <defs>
+                      <linearGradient id="colorCleanHum" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
                     <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
                     <YAxis 
@@ -1109,7 +1262,7 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Line type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorCleanHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                     <Brush 
                       dataKey="displayTime" 
                       height={20} 
@@ -1122,7 +1275,7 @@ const App = () => {
                         setZoomEnd(obj.endIndex);
                       }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>

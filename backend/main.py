@@ -29,6 +29,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Sensor-Active"],
 )
 
 # ---- Configuration & Email Alerts Setup ----
@@ -890,11 +891,17 @@ def get_model_for_room(room: str):
     raise HTTPException(status_code=404, detail="Room not found")
 
 @app.get("/data/{room}/latest")
-def get_latest_data(room: str, db: Session = Depends(get_db)):
+def get_latest_data(room: str, response: Response, db: Session = Depends(get_db)):
     model = get_model_for_room(room)
     latest = db.query(model).order_by(model.timestamp.desc()).first()
     if not latest:
         raise HTTPException(status_code=404, detail="No data found")
+    
+    # Check if the latest data is active (within last 30 seconds)
+    time_diff = datetime.now() - latest.timestamp
+    is_active = "true" if time_diff.total_seconds() < 30 else "false"
+    response.headers["X-Sensor-Active"] = is_active
+    
     return latest
 
 def parse_iso_datetime(dt_str: str) -> datetime:

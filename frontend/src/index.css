@@ -29,11 +29,21 @@
     border-color: rgba(51, 65, 85, 0.5);
     color: #f1f5f9;
   }
+  .theme-card.dark:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 25px -10px rgba(59, 130, 246, 0.15), 0 0 15px 1px var(--card-glow-color, rgba(59, 130, 246, 0.05));
+    border-color: var(--card-border-color, rgba(51, 65, 85, 0.8));
+  }
   .theme-card.light {
     background-color: rgba(255, 255, 255, 0.95);
     border-color: rgba(226, 232, 240, 0.9);
     color: #1e293b;
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  }
+  .theme-card.light:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 25px -10px rgba(0, 0, 0, 0.08);
+    border-color: rgba(203, 213, 225, 0.9);
   }
 
   .theme-input {
