@@ -42,7 +42,7 @@ config = {
     "humidity_threshold_cleanroom": 60.0,
     "humidity_threshold_fablab": 65.0,
     "alert_cooldown_minutes": 30,
-    "daily_summary_time": "08:00"
+    "daily_summary_time": "08:30"
 }
 
 if os.path.exists(CONFIG_PATH):
@@ -77,7 +77,26 @@ last_alert_sent = {
     "fablab": None
 }
 
-def send_email_sync(subject: str, body: str):
+# Track consecutive zero readings to filter out transient glitches (require 3 counts or 15 seconds)
+consecutive_zeros = {
+    "dht_temp": 0,
+    "dht_hum": 0,
+    "ds1_temp": 0,
+    "ds2_temp": 0,
+    "ds3_temp": 0
+}
+
+# Track if a failure alert has already been sent for each sensor
+sensor_failed_state = {
+    "dht_temp": False,
+    "dht_hum": False,
+    "ds1_temp": False,
+    "ds2_temp": False,
+    "ds3_temp": False
+}
+
+
+def send_email_sync(subject: str, body: str, attachments: list = None):
     if config["smtp_password"] in ("YOUR_GMAIL_APP_PASSWORD_HERE", "", None):
         print("[SMTP] Email skipped: Gmail App Password is not configured in config.json.")
         return
@@ -93,6 +112,14 @@ def send_email_sync(subject: str, body: str):
         msg['To'] = ", ".join(recipients)
         msg['Subject'] = Header(subject, 'utf-8')
         msg.attach(MIMEText(body, 'html', 'utf-8'))
+        
+        if attachments:
+            from email.mime.image import MIMEImage
+            for cid, img_bytes in attachments:
+                mime_img = MIMEImage(img_bytes)
+                mime_img.add_header('Content-ID', f'<{cid}>')
+                mime_img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
+                msg.attach(mime_img)
         
         server = smtplib.SMTP_SSL(config["smtp_server"], config["smtp_port"])
         server.login(config["smtp_email"], config["smtp_password"])
@@ -142,6 +169,112 @@ def load_limits_from_pdf():
         
     return temp_min, temp_max, hum_max
 
+def check_sensor_status(sensor_key: str, value: float, display_name: str, background_tasks: BackgroundTasks):
+    global consecutive_zeros, sensor_failed_state
+    
+    if value == 0.0:
+        consecutive_zeros[sensor_key] += 1
+        # Trigger failure alert if 0.0 is read 3 times consecutively (15 seconds)
+        if consecutive_zeros[sensor_key] >= 3 and not sensor_failed_state[sensor_key]:
+            sensor_failed_state[sensor_key] = True
+            
+            # Save alert log to database
+            from database import SessionLocal
+            db = SessionLocal()
+            try:
+                log_item = models.AlertLog(
+                    room="cleanroom",
+                    sensor=display_name,
+                    value=0.0,
+                    limit_value=0.0,
+                    message=f"Sensor Failure: {display_name} is disconnected or reading 0.0"
+                )
+                db.add(log_item)
+                db.commit()
+            except Exception as dbe:
+                print(f"[Alert DB] Failed to save {display_name} sensor failure log: {dbe}")
+            finally:
+                db.close()
+                
+            # Send Email
+            subject = f"⚠️ Hardware Alert: {display_name} Sensor Failure"
+            body = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <div style="background-color: #ffebee; border-left: 5px solid #ef5350; padding: 15px; margin-bottom: 20px;">
+                        <h2 style="color: #c62828; margin-top: 0; margin-bottom: 0;">⚠️ Hardware Failure Alert</h2>
+                    </div>
+                    <p>The system has detected that the <strong>{display_name}</strong> sensor is reporting 0.0 (possibly disconnected or failed) for more than 15 seconds.</p>
+                    <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold; width: 150px;">Sensor:</td>
+                            <td style="padding: 10px;">{display_name}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold;">Status:</td>
+                            <td style="padding: 10px; color: #dc2626; font-weight: bold;">Disconnected / Reading 0.0</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold;">Timestamp:</td>
+                            <td style="padding: 10px;">{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</td>
+                        </tr>
+                    </table>
+                    <p style="font-size: 12px; color: #888; margin-top: 20px;">Please check the physical hardware connections of the sensor.</p>
+                </body>
+            </html>
+            """
+            background_tasks.add_task(send_email_sync, subject, body)
+    else:
+        consecutive_zeros[sensor_key] = 0
+        if sensor_failed_state[sensor_key]:
+            sensor_failed_state[sensor_key] = False
+            
+            # Save alert log to database
+            from database import SessionLocal
+            db = SessionLocal()
+            try:
+                log_item = models.AlertLog(
+                    room="cleanroom",
+                    sensor=display_name,
+                    value=value,
+                    limit_value=0.0,
+                    message=f"Sensor Recovered: {display_name} is back online (Value: {value})"
+                )
+                db.add(log_item)
+                db.commit()
+            except Exception as dbe:
+                print(f"[Alert DB] Failed to save {display_name} sensor recovery log: {dbe}")
+            finally:
+                db.close()
+                
+            # Send Email
+            subject = f"✅ Resolved: {display_name} Sensor Recovered"
+            body = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <div style="background-color: #e8f5e9; border-left: 5px solid #4caf50; padding: 15px; margin-bottom: 20px;">
+                        <h2 style="color: #2e7d32; margin-top: 0; margin-bottom: 0;">✅ Sensor Failure Resolved</h2>
+                    </div>
+                    <p>The <strong>{display_name}</strong> sensor has recovered and is now reporting valid values.</p>
+                    <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold; width: 150px;">Sensor:</td>
+                            <td style="padding: 10px;">{display_name}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold;">Current Value:</td>
+                            <td style="padding: 10px; color: #16a34a; font-weight: bold;">{value}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px; font-weight: bold;">Timestamp:</td>
+                            <td style="padding: 10px;">{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</td>
+                        </tr>
+                    </table>
+                </body>
+            </html>
+            """
+            background_tasks.add_task(send_email_sync, subject, body)
+
 def check_cleanroom_alerts(db_item, background_tasks: BackgroundTasks):
     temp_min, temp_max, hum_max = load_limits_from_pdf()
     
@@ -151,25 +284,33 @@ def check_cleanroom_alerts(db_item, background_tasks: BackgroundTasks):
     ds2_temp = db_item.ds2_temp
     ds3_temp = db_item.ds3_temp
     
+    # Check sensor online/offline states
+    check_sensor_status("dht_temp", dht_temp, "DHT Ambient Temp", background_tasks)
+    check_sensor_status("dht_hum", dht_hum, "DHT Humidity", background_tasks)
+    check_sensor_status("ds1_temp", ds1_temp, "Air Inlet (DS1)", background_tasks)
+    check_sensor_status("ds2_temp", ds2_temp, "Optical Table 1 (DS2)", background_tasks)
+    check_sensor_status("ds3_temp", ds3_temp, "Optical Table 2 (DS3)", background_tasks)
+    
     reasons = []
     breached_sensors = []
     
-    if dht_hum >= hum_max:
+    # Only verify environment safety limits if the reading is not 0.0 (not errored)
+    if dht_hum != 0.0 and dht_hum >= hum_max:
         reasons.append(f"DHT Humidity ({dht_hum}%) exceeded safety limit (<{hum_max}%)")
         breached_sensors.append(("DHT Humidity", dht_hum, hum_max, f"Humidity ({dht_hum}%) exceeded safety limit (<{hum_max}%)"))
-    if not (temp_min <= dht_temp <= temp_max):
+    if dht_temp != 0.0 and not (temp_min <= dht_temp <= temp_max):
         reasons.append(f"DHT Ambient Temp ({dht_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)")
         limit_val = temp_min if dht_temp < temp_min else temp_max
         breached_sensors.append(("DHT Ambient Temp", dht_temp, limit_val, f"Temperature ({dht_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)"))
-    if not (temp_min <= ds1_temp <= temp_max):
+    if ds1_temp != 0.0 and not (temp_min <= ds1_temp <= temp_max):
         reasons.append(f"Air Inlet DS1 Temp ({ds1_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)")
         limit_val = temp_min if ds1_temp < temp_min else temp_max
         breached_sensors.append(("Air Inlet (DS1)", ds1_temp, limit_val, f"Air Inlet Temp ({ds1_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)"))
-    if not (temp_min <= ds2_temp <= temp_max):
+    if ds2_temp != 0.0 and not (temp_min <= ds2_temp <= temp_max):
         reasons.append(f"Optical Table 1 DS2 Temp ({ds2_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)")
         limit_val = temp_min if ds2_temp < temp_min else temp_max
         breached_sensors.append(("Optical Table 1 (DS2)", ds2_temp, limit_val, f"Optical Table 1 Temp ({ds2_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)"))
-    if not (temp_min <= ds3_temp <= temp_max):
+    if ds3_temp != 0.0 and not (temp_min <= ds3_temp <= temp_max):
         reasons.append(f"Optical Table 2 DS3 Temp ({ds3_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)")
         limit_val = temp_min if ds3_temp < temp_min else temp_max
         breached_sensors.append(("Optical Table 2 (DS3)", ds3_temp, limit_val, f"Optical Table 2 Temp ({ds3_temp}°C) outside safety limit ({temp_min}-{temp_max}°C)"))
@@ -328,6 +469,115 @@ def check_and_trigger_alerts(room: str, humidity: float, temp: float, background
             """
             background_tasks.add_task(send_email_sync, subject, body)
 
+def generate_summary_charts(db: Session, yesterday: datetime):
+    import io
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    
+    attachments = []
+    
+    # --- Cleanroom Chart ---
+    cleanroom_data = db.query(models.CleanroomData).filter(
+        models.CleanroomData.timestamp >= yesterday
+    ).order_by(models.CleanroomData.timestamp.asc()).all()
+    
+    if cleanroom_data:
+        times = [r.timestamp for r in cleanroom_data]
+        dht_t = [r.dht_temp for r in cleanroom_data]
+        dht_h = [r.dht_hum for r in cleanroom_data]
+        ds1 = [r.ds1_temp for r in cleanroom_data]
+        ds2 = [r.ds2_temp for r in cleanroom_data]
+        ds3 = [r.ds3_temp for r in cleanroom_data]
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+        
+        # Plot Temperatures
+        ax1.plot(times, dht_t, label="DHT Ambient", color="#3b82f6", linewidth=1.5)
+        ax1.plot(times, ds1, label="Air Inlet (DS1)", color="#22d3ee", linewidth=1.5)
+        ax1.plot(times, ds2, label="Optical Table 1 (DS2)", color="#06b6d4", linewidth=1.5)
+        ax1.plot(times, ds3, label="Optical Table 2 (DS3)", color="#0891b2", linewidth=1.5)
+        ax1.set_ylabel("Temperature (°C)")
+        ax1.set_title("Cleanroom 24-Hour Temperature Trends")
+        ax1.legend(loc="upper left")
+        ax1.grid(True, linestyle="--", alpha=0.5)
+        
+        # Plot Humidity
+        ax2.plot(times, dht_h, label="DHT Humidity", color="#10b981", linewidth=1.5)
+        ax2.set_ylabel("Humidity (%)")
+        ax2.set_title("Cleanroom 24-Hour Humidity Trends")
+        ax2.legend(loc="upper left")
+        ax2.grid(True, linestyle="--", alpha=0.5)
+        
+        # Format X-axis
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax2.xaxis.set_major_locator(mdates.HourLocator(interval=3))
+        plt.xticks(rotation=45)
+        
+        fig.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+        buf.seek(0)
+        attachments.append(("cleanroom_chart", buf.read()))
+        plt.close(fig)
+        
+    # --- Fablab Chart ---
+    fablab_data = db.query(models.FablabData).filter(
+        models.FablabData.timestamp >= yesterday
+    ).order_by(models.FablabData.timestamp.asc()).all()
+    
+    if fablab_data:
+        times = [r.timestamp for r in fablab_data]
+        temp = [r.temperature for r in fablab_data]
+        hum = [r.humidity for r in fablab_data]
+        eco2 = [r.eco2 for r in fablab_data]
+        tvoc = [r.tvoc for r in fablab_data]
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+        
+        # Plot Temp & Hum
+        ax1.plot(times, temp, label="Temperature (°C)", color="#3b82f6", linewidth=1.5)
+        ax1_right = ax1.twinx()
+        ax1_right.plot(times, hum, label="Humidity (%)", color="#10b981", linewidth=1.5)
+        ax1.set_ylabel("Temperature (°C)", color="#3b82f6")
+        ax1_right.set_ylabel("Humidity (%)", color="#10b981")
+        ax1.set_title("FabLab 24-Hour Temperature & Humidity")
+        
+        # Combine legends
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax1_right.get_legend_handles_labels()
+        ax1.legend(lines + lines2, labels + labels2, loc="upper left")
+        ax1.grid(True, linestyle="--", alpha=0.5)
+        
+        # Plot AQ (eCO2 & TVOC)
+        ax2.plot(times, eco2, label="eCO2 (ppm)", color="#8b5cf6", linewidth=1.5)
+        ax2_right = ax2.twinx()
+        ax2_right.plot(times, tvoc, label="TVOC (ppb)", color="#f59e0b", linewidth=1.5)
+        ax2.set_ylabel("eCO2 (ppm)", color="#8b5cf6")
+        ax2_right.set_ylabel("TVOC (ppb)", color="#f59e0b")
+        ax2.set_title("FabLab 24-Hour Air Quality (eCO2 & TVOC)")
+        
+        # Combine legends
+        lines, labels = ax2.get_legend_handles_labels()
+        lines2, labels2 = ax2_right.get_legend_handles_labels()
+        ax2.legend(lines + lines2, labels + labels2, loc="upper left")
+        ax2.grid(True, linestyle="--", alpha=0.5)
+        
+        # Format X-axis
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax2.xaxis.set_major_locator(mdates.HourLocator(interval=3))
+        plt.xticks(rotation=45)
+        
+        fig.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+        buf.seek(0)
+        attachments.append(("fablab_chart", buf.read()))
+        plt.close(fig)
+        
+    return attachments
+
 def send_daily_summary(db: Session):
     now = datetime.now()
     yesterday = now - timedelta(days=1)
@@ -381,6 +631,30 @@ def send_daily_summary(db: Session):
         else:
             return '<span style="color: #dc2626; font-weight: bold;">ไม่ปกติ</span>'
         
+    attachments = []
+    try:
+        attachments = generate_summary_charts(db, yesterday)
+    except Exception as chart_err:
+        print(f"[Daily Summary] Failed to generate summary charts: {chart_err}")
+
+    cleanroom_img_html = ""
+    fablab_img_html = ""
+    for cid, _ in attachments:
+        if cid == "cleanroom_chart":
+            cleanroom_img_html = """
+            <div style="margin-top: 25px; text-align: center; margin-bottom: 25px;">
+                <h4 style="color: #0369a1; text-align: left; margin-bottom: 8px;">📈 Cleanroom 24-Hour Visual Trends</h4>
+                <img src="cid:cleanroom_chart" alt="Cleanroom Trends" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px;" />
+            </div>
+            """
+        elif cid == "fablab_chart":
+            fablab_img_html = """
+            <div style="margin-top: 25px; text-align: center; margin-bottom: 25px;">
+                <h4 style="color: #0f766e; text-align: left; margin-bottom: 8px;">📈 Fablab 24-Hour Visual Trends</h4>
+                <img src="cid:fablab_chart" alt="Fablab Trends" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px;" />
+            </div>
+            """
+
     subject = f"📊 Daily Lab Summary Report - {now.strftime('%d %b %Y')}"
     
     body = f"""
@@ -444,6 +718,7 @@ def send_daily_summary(db: Session):
                 <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
                     * เกณฑ์ความปลอดภัยห้อง Cleanroom อ้างอิงตามคู่มืออุปกรณ์ Thorlabs 202C.pdf (อุณหภูมิ: {temp_min_limit}-{temp_max_limit}°C, ความชื้น: &lt; {hum_max_limit}%)
                 </div>
+                {cleanroom_img_html}
             </div>
             
             <div style="margin-bottom: 30px;">
@@ -478,6 +753,7 @@ def send_daily_summary(db: Session):
                         </tr>
                     </tbody>
                 </table>
+                {fablab_img_html}
             </div>
             
             <div style="border-top: 1px solid #e2e8f0; padding-top: 15px; font-size: 11px; color: #94a3b8; text-align: center;">
@@ -486,7 +762,7 @@ def send_daily_summary(db: Session):
         </body>
     </html>
     """
-    send_email_sync(subject, body)
+    send_email_sync(subject, body, attachments=attachments)
 
 async def daily_summary_scheduler():
     print("[Scheduler] Daily summary scheduler background task started.")
@@ -654,10 +930,28 @@ def get_data_history(
         end_datetime = parse_iso_datetime(end_time)
         
     if not start_datetime:
-        if range == "24h":
-            start_datetime = now - timedelta(hours=24)
-        elif range == "30d":
+        if range == "1h":
+            start_datetime = now - timedelta(hours=1)
+        elif range == "6h":
+            start_datetime = now - timedelta(hours=6)
+        elif range == "12h":
+            start_datetime = now - timedelta(hours=12)
+        elif range in ("1d", "24h"):
+            start_datetime = now - timedelta(days=1)
+        elif range == "3d":
+            start_datetime = now - timedelta(days=3)
+        elif range == "1w":
+            start_datetime = now - timedelta(weeks=1)
+        elif range == "2w":
+            start_datetime = now - timedelta(weeks=2)
+        elif range in ("1m", "30d"):
             start_datetime = now - timedelta(days=30)
+        elif range == "3m":
+            start_datetime = now - timedelta(days=90)
+        elif range == "6m":
+            start_datetime = now - timedelta(days=180)
+        elif range == "all":
+            start_datetime = datetime(2000, 1, 1)  # Fallback to early date since datetime.min might cause overflow with SQLite
         else:
             start_datetime = now - timedelta(hours=24)
             
