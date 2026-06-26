@@ -1074,20 +1074,20 @@ def export_data(
     data = query.order_by(model.timestamp.desc()).all()
     
     if start_dt:
-        start_str = start_dt.strftime('%Y%m%d')
+        start_str = start_dt.strftime('%d-%m-%Y')
     elif data:
-        start_str = data[-1].timestamp.strftime('%Y%m%d')
+        start_str = data[-1].timestamp.strftime('%d-%m-%Y')
     else:
-        start_str = datetime.now().strftime('%Y%m%d')
+        start_str = datetime.now().strftime('%d-%m-%Y')
         
     if end_dt:
-        end_str = end_dt.strftime('%Y%m%d')
+        end_str = end_dt.strftime('%d-%m-%Y')
     elif data:
-        end_str = data[0].timestamp.strftime('%Y%m%d')
+        end_str = data[0].timestamp.strftime('%d-%m-%Y')
     else:
-        end_str = datetime.now().strftime('%Y%m%d')
+        end_str = datetime.now().strftime('%d-%m-%Y')
         
-    filename = f"{start_str}-{end_str}_{room.capitalize()}.csv"
+    filename = f"{start_str}_to_{end_str}_{room.capitalize()}.csv"
     
     output = io.StringIO()
     writer = csv.writer(output)

@@ -174,7 +174,15 @@ const App = () => {
   const [alertLogs, setAlertLogs] = useState([]);
   const [recipientEmails, setRecipientEmails] = useState([]);
   const [newEmail, setNewEmail] = useState('');
-  const [showExportToast, setShowExportToast] = useState(false);
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (message, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3500);
+  };
 
   // Chart Axis Limit States (Custom yMin/yMax settings)
   const [tempYMin, setTempYMin] = useState('');
@@ -237,8 +245,10 @@ const App = () => {
       try {
         await axios.post(`${API_BASE_URL}/data/alerts/clear`);
         setAlertLogs([]);
+        showToast("ล้างประวัติการแจ้งเตือนภัยทั้งหมดเรียบร้อยแล้ว", "success");
       } catch (error) {
         console.error("Error clearing alert logs", error);
+        showToast("ล้างประวัติการแจ้งเตือนล้มเหลว", "error");
       }
     }
   };
@@ -258,7 +268,7 @@ const App = () => {
     if (!email) return;
     
     if (!email.includes('@') || !email.includes('.')) {
-      alert("กรุณากรอกรูปแบบอีเมลให้ถูกต้อง");
+      showToast("กรุณากรอกรูปแบบอีเมลให้ถูกต้อง", "error");
       return;
     }
 
@@ -266,9 +276,10 @@ const App = () => {
       const response = await axios.post(`${API_BASE_URL}/config/emails`, { email });
       setRecipientEmails(response.data);
       setNewEmail('');
+      showToast("เพิ่มอีเมลผู้รับแจ้งเตือนสำเร็จแล้ว", "success");
     } catch (error) {
       console.error("Error adding email", error);
-      alert(error.response?.data?.detail || "เกิดข้อผิดพลาดในการเพิ่มอีเมล");
+      showToast(error.response?.data?.detail || "เกิดข้อผิดพลาดในการเพิ่มอีเมล", "error");
     }
   };
 
@@ -279,9 +290,10 @@ const App = () => {
           params: { email: emailToRemove }
         });
         setRecipientEmails(response.data);
+        showToast("ลบอีเมลออกจากการแจ้งเตือนสำเร็จ", "success");
       } catch (error) {
         console.error("Error removing email", error);
-        alert(error.response?.data?.detail || "เกิดข้อผิดพลาดในการลบอีเมล");
+        showToast(error.response?.data?.detail || "เกิดข้อผิดพลาดในการลบอีเมล", "error");
       }
     }
   };
@@ -637,12 +649,16 @@ const App = () => {
     if (startTime) params.push(`start_time=${encodeURIComponent(startTime)}`);
     if (endTime) params.push(`end_time=${encodeURIComponent(endTime)}`);
     const queryString = params.length > 0 ? `?${params.join('&')}` : '';
-    window.open(`${API_BASE_URL}/data/${activeTab}/export${queryString}`, '_blank');
     
-    setShowExportToast(true);
-    setTimeout(() => {
-      setShowExportToast(false);
-    }, 3000);
+    // Trigger download silently in the same tab to ensure the Toast is visible
+    const link = document.createElement('a');
+    link.href = `${API_BASE_URL}/data/${activeTab}/export${queryString}`;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast("เริ่มดาวน์โหลดไฟล์ CSV เรียบร้อยแล้ว", "info");
   };
 
   const getTempDomain = (defaultMin = 10, defaultMax = 40) => {
@@ -1525,13 +1541,17 @@ const App = () => {
           )}
         </div>
       </div>
-      {/* Export Toast Notification */}
-      {showExportToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-emerald-600 text-white px-5 py-3.5 rounded-xl shadow-2xl border border-emerald-500/20 font-medium animate-pulse">
-          <Download size={20} />
-          <span>Exporting CSV data... Your download has started!</span>
-        </div>
-      )}
+      {/* Dynamic Toast Notifications */}
+      <div className="toast-container">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast-notification ${isDarkMode ? 'dark' : 'light'} ${t.type}`}>
+            {t.type === 'success' && <div className="text-emerald-500 font-bold flex-shrink-0">✓</div>}
+            {t.type === 'error' && <div className="text-red-500 font-bold flex-shrink-0">✗</div>}
+            {t.type === 'info' && <Download className="text-blue-500 flex-shrink-0" size={16} />}
+            <span className="text-sm font-medium">{t.message}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

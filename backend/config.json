@@ -4,7 +4,6 @@
   "smtp_email": "copphotonicchip@gmail.com",
   "smtp_password": "ajlv dgqh cqql ueiq",
   "recipient_emails": [
-    "kandanai@narit.or.th",
     "kandanaikid@gmail.com"
   ],
   "humidity_threshold_cleanroom": 60.0,
