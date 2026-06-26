@@ -78,13 +78,13 @@ last_alert_sent = {
     "fablab": None
 }
 
-# Track consecutive zero readings to filter out transient glitches (require 3 counts or 15 seconds)
-consecutive_zeros = {
-    "dht_temp": 0,
-    "dht_hum": 0,
-    "ds1_temp": 0,
-    "ds2_temp": 0,
-    "ds3_temp": 0
+# Track the timestamp when a sensor first reported 0.0 to check for continuous failure (require 10 minutes)
+zero_first_detected = {
+    "dht_temp": None,
+    "dht_hum": None,
+    "ds1_temp": None,
+    "ds2_temp": None,
+    "ds3_temp": None
 }
 
 # Track if a failure alert has already been sent for each sensor
@@ -171,12 +171,15 @@ def load_limits_from_pdf():
     return temp_min, temp_max, hum_max
 
 def check_sensor_status(sensor_key: str, value: float, display_name: str, background_tasks: BackgroundTasks):
-    global consecutive_zeros, sensor_failed_state
+    global zero_first_detected, sensor_failed_state
     
     if value == 0.0:
-        consecutive_zeros[sensor_key] += 1
-        # Trigger failure alert if 0.0 is read 3 times consecutively (15 seconds)
-        if consecutive_zeros[sensor_key] >= 3 and not sensor_failed_state[sensor_key]:
+        if zero_first_detected[sensor_key] is None:
+            zero_first_detected[sensor_key] = datetime.now()
+        
+        # Trigger failure alert if 0.0 is read continuously for 10 minutes
+        elapsed = datetime.now() - zero_first_detected[sensor_key]
+        if elapsed >= timedelta(minutes=10) and not sensor_failed_state[sensor_key]:
             sensor_failed_state[sensor_key] = True
             
             # Save alert log to database
@@ -188,7 +191,7 @@ def check_sensor_status(sensor_key: str, value: float, display_name: str, backgr
                     sensor=display_name,
                     value=0.0,
                     limit_value=0.0,
-                    message=f"Sensor Failure: {display_name} is disconnected or reading 0.0"
+                    message=f"Sensor Failure: {display_name} is disconnected or reading 0.0 (Failed for 10 mins)"
                 )
                 db.add(log_item)
                 db.commit()
@@ -205,7 +208,7 @@ def check_sensor_status(sensor_key: str, value: float, display_name: str, backgr
                     <div style="background-color: #ffebee; border-left: 5px solid #ef5350; padding: 15px; margin-bottom: 20px;">
                         <h2 style="color: #c62828; margin-top: 0; margin-bottom: 0;">⚠️ Hardware Failure Alert</h2>
                     </div>
-                    <p>The system has detected that the <strong>{display_name}</strong> sensor is reporting 0.0 (possibly disconnected or failed) for more than 15 seconds.</p>
+                    <p>The system has detected that the <strong>{display_name}</strong> sensor has been reporting 0.0 (possibly disconnected or failed) for more than 10 minutes.</p>
                     <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
                         <tr style="border-bottom: 1px solid #ddd;">
                             <td style="padding: 10px; font-weight: bold; width: 150px;">Sensor:</td>
@@ -213,7 +216,7 @@ def check_sensor_status(sensor_key: str, value: float, display_name: str, backgr
                         </tr>
                         <tr style="border-bottom: 1px solid #ddd;">
                             <td style="padding: 10px; font-weight: bold;">Status:</td>
-                            <td style="padding: 10px; color: #dc2626; font-weight: bold;">Disconnected / Reading 0.0</td>
+                            <td style="padding: 10px; color: #dc2626; font-weight: bold;">Disconnected / Reading 0.0 (Failed for 10 mins)</td>
                         </tr>
                         <tr style="border-bottom: 1px solid #ddd;">
                             <td style="padding: 10px; font-weight: bold;">Timestamp:</td>
@@ -226,7 +229,7 @@ def check_sensor_status(sensor_key: str, value: float, display_name: str, backgr
             """
             background_tasks.add_task(send_email_sync, subject, body)
     else:
-        consecutive_zeros[sensor_key] = 0
+        zero_first_detected[sensor_key] = None
         if sensor_failed_state[sensor_key]:
             sensor_failed_state[sensor_key] = False
             
@@ -584,33 +587,33 @@ def send_daily_summary(db: Session):
     yesterday = now - timedelta(days=1)
     
     fablab_stats = db.query(
-        func.avg(models.FablabData.temperature).label("avg_temp"),
-        func.min(models.FablabData.temperature).label("min_temp"),
-        func.max(models.FablabData.temperature).label("max_temp"),
-        func.avg(models.FablabData.humidity).label("avg_hum"),
-        func.min(models.FablabData.humidity).label("min_hum"),
-        func.max(models.FablabData.humidity).label("max_hum"),
-        func.avg(models.FablabData.eco2).label("avg_co2"),
-        func.min(models.FablabData.eco2).label("min_co2"),
-        func.max(models.FablabData.eco2).label("max_co2")
+        func.avg(func.nullif(models.FablabData.temperature, 0.0)).label("avg_temp"),
+        func.min(func.nullif(models.FablabData.temperature, 0.0)).label("min_temp"),
+        func.max(func.nullif(models.FablabData.temperature, 0.0)).label("max_temp"),
+        func.avg(func.nullif(models.FablabData.humidity, 0.0)).label("avg_hum"),
+        func.min(func.nullif(models.FablabData.humidity, 0.0)).label("min_hum"),
+        func.max(func.nullif(models.FablabData.humidity, 0.0)).label("max_hum"),
+        func.avg(func.nullif(models.FablabData.eco2, 0.0)).label("avg_co2"),
+        func.min(func.nullif(models.FablabData.eco2, 0.0)).label("min_co2"),
+        func.max(func.nullif(models.FablabData.eco2, 0.0)).label("max_co2")
     ).filter(models.FablabData.timestamp >= yesterday).first()
     
     cleanroom_stats = db.query(
-        func.avg(models.CleanroomData.dht_temp).label("avg_temp"),
-        func.min(models.CleanroomData.dht_temp).label("min_temp"),
-        func.max(models.CleanroomData.dht_temp).label("max_temp"),
-        func.avg(models.CleanroomData.dht_hum).label("avg_hum"),
-        func.min(models.CleanroomData.dht_hum).label("min_hum"),
-        func.max(models.CleanroomData.dht_hum).label("max_hum"),
-        func.avg(models.CleanroomData.ds1_temp).label("avg_ds1"),
-        func.min(models.CleanroomData.ds1_temp).label("min_ds1"),
-        func.max(models.CleanroomData.ds1_temp).label("max_ds1"),
-        func.avg(models.CleanroomData.ds2_temp).label("avg_ds2"),
-        func.min(models.CleanroomData.ds2_temp).label("min_ds2"),
-        func.max(models.CleanroomData.ds2_temp).label("max_ds2"),
-        func.avg(models.CleanroomData.ds3_temp).label("avg_ds3"),
-        func.min(models.CleanroomData.ds3_temp).label("min_ds3"),
-        func.max(models.CleanroomData.ds3_temp).label("max_ds3")
+        func.avg(func.nullif(models.CleanroomData.dht_temp, 0.0)).label("avg_temp"),
+        func.min(func.nullif(models.CleanroomData.dht_temp, 0.0)).label("min_temp"),
+        func.max(func.nullif(models.CleanroomData.dht_temp, 0.0)).label("max_temp"),
+        func.avg(func.nullif(models.CleanroomData.dht_hum, 0.0)).label("avg_hum"),
+        func.min(func.nullif(models.CleanroomData.dht_hum, 0.0)).label("min_hum"),
+        func.max(func.nullif(models.CleanroomData.dht_hum, 0.0)).label("max_hum"),
+        func.avg(func.nullif(models.CleanroomData.ds1_temp, 0.0)).label("avg_ds1"),
+        func.min(func.nullif(models.CleanroomData.ds1_temp, 0.0)).label("min_ds1"),
+        func.max(func.nullif(models.CleanroomData.ds1_temp, 0.0)).label("max_ds1"),
+        func.avg(func.nullif(models.CleanroomData.ds2_temp, 0.0)).label("avg_ds2"),
+        func.min(func.nullif(models.CleanroomData.ds2_temp, 0.0)).label("min_ds2"),
+        func.max(func.nullif(models.CleanroomData.ds2_temp, 0.0)).label("max_ds2"),
+        func.avg(func.nullif(models.CleanroomData.ds3_temp, 0.0)).label("avg_ds3"),
+        func.min(func.nullif(models.CleanroomData.ds3_temp, 0.0)).label("min_ds3"),
+        func.max(func.nullif(models.CleanroomData.ds3_temp, 0.0)).label("max_ds3")
     ).filter(models.CleanroomData.timestamp >= yesterday).first()
     
     def fmt(val, digits=1):
