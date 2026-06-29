@@ -170,7 +170,7 @@ const CustomTooltip = ({ active, payload, label, isDarkMode }) => {
               </div>
               {hasRange && (
                 <div className={`text-[10px] pl-4 mt-0.5 font-mono flex justify-between ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  <span>ช่วงผันผวน (Range):</span>
+                  <span>Min / Max:</span>
                   <span>{formatVal(minVal, entry.name)} - {formatVal(maxVal, entry.name)}</span>
                 </div>
               )}
@@ -1133,7 +1133,7 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
+                    <Area type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} fill="none" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1142,7 +1142,7 @@ const App = () => {
                   <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
                     <XAxis dataKey="displayTime" hide />
                     <YAxis hide />
-                    <Area type="monotone" dataKey="humidity" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#10b981" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="humidity" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill="none" dot={false} isAnimationActive={false} />
                     <Brush 
                       key={`brush-${brushKey}`}
                       dataKey="displayTime" 
@@ -1382,7 +1382,7 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorCleanHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
+                    <Area type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} fill="none" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1391,7 +1391,7 @@ const App = () => {
                   <AreaChart data={historyData} margin={{ top: 0, right: 10, left: 20, bottom: 0 }}>
                     <XAxis dataKey="displayTime" hide />
                     <YAxis hide />
-                    <Area type="monotone" dataKey="dht_hum" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill={isDarkMode ? "#10b981" : "#cbd5e1"} fillOpacity={0.05} dot={false} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="dht_hum" stroke={isDarkMode ? "#10b981" : "#cbd5e1"} strokeWidth={1} fill="none" dot={false} isAnimationActive={false} />
                     <Brush 
                       key={`brush-${brushKey}`}
                       dataKey="displayTime" 
