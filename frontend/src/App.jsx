@@ -191,6 +191,164 @@ const CustomTooltip = ({ active, payload, label, isDarkMode }) => {
   return null;
 };
 
+const DateTimePicker24h = ({ value, onChange, isDarkMode, dropPosition = "auto" }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [placement, setPlacement] = useState("bottom");
+  const dropdownRef = useRef(null);
+
+  const dateVal = value ? value.split('T')[0] : '';
+  const timeVal = value && value.includes('T') ? value.split('T')[1] : '00:00';
+  const hourVal = timeVal ? timeVal.split(':')[0].padStart(2, '0') : '00';
+  const minuteVal = timeVal ? timeVal.split(':')[1].padStart(2, '0') : '00';
+
+  const formatDisplay = () => {
+    if (!value || !dateVal) return "เลือกวันและเวลา (24h)...";
+    const [y, m, d] = dateVal.split('-');
+    return `${d}/${m}/${y} ${hourVal}:${minuteVal} น.`;
+  };
+
+  const handleDateChange = (e) => {
+    const d = e.target.value;
+    if (!d) {
+      onChange('');
+      return;
+    }
+    onChange(`${d}T${hourVal}:${minuteVal}`);
+  };
+
+  const handleHourChange = (e) => {
+    const h = e.target.value;
+    const nowStr = new Date().toISOString().slice(0, 10);
+    const d = dateVal || nowStr;
+    onChange(`${d}T${h}:${minuteVal}`);
+  };
+
+  const handleMinuteChange = (e) => {
+    const m = e.target.value;
+    const nowStr = new Date().toISOString().slice(0, 10);
+    const d = dateVal || nowStr;
+    onChange(`${d}T${hourVal}:${m}`);
+  };
+
+  useEffect(() => {
+    if (isOpen && dropdownRef.current) {
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (dropPosition === "top" || (dropPosition === "auto" && spaceBelow < 320)) {
+        setPlacement("top");
+      } else {
+        setPlacement("bottom");
+      }
+    }
+  }, [isOpen, dropPosition]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative inline-block w-full min-w-[210px]" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-semibold font-mono border transition-all cursor-pointer ${
+          value
+            ? isDarkMode 
+              ? 'bg-blue-950/50 border-blue-500/60 text-blue-300 shadow-md shadow-blue-500/10' 
+              : 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+            : isDarkMode
+              ? 'bg-slate-900/80 border-slate-700/80 text-slate-400 hover:text-white'
+              : 'bg-white border-slate-300 text-slate-500 hover:text-slate-900'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <Calendar size={14} className="text-blue-500 flex-shrink-0" />
+          <span>{formatDisplay()}</span>
+        </div>
+        <Clock size={13} className="opacity-60 flex-shrink-0" />
+      </button>
+
+      {isOpen && (
+        <div className={`absolute left-0 z-[9999] p-4 rounded-2xl border shadow-2xl backdrop-blur-xl w-72 transition-all animate-fade-in ${
+          placement === "top" ? "bottom-full mb-2" : "top-full mt-2"
+        } ${
+          isDarkMode 
+            ? 'bg-slate-900/95 border-slate-700 text-slate-200 shadow-slate-950/80' 
+            : 'bg-white/95 border-slate-200 text-slate-800 shadow-xl'
+        }`}>
+          <div className="flex justify-between items-center pb-2 mb-3 border-b border-slate-700/40">
+            <span className="text-xs font-bold flex items-center gap-1.5 text-blue-500">
+              <Clock size={14} /> เลือกเวลาแบบ 24 ชั่วโมง
+            </span>
+            <button 
+              type="button" 
+              onClick={() => setIsOpen(false)} 
+              className="text-xs font-bold text-slate-400 hover:text-white px-1.5 py-0.5 rounded cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mb-3">
+            <label className="text-[10px] uppercase font-extrabold text-slate-400 block mb-1">1. เลือกวันที่ (Date)</label>
+            <input 
+              type="date" 
+              value={dateVal} 
+              onChange={handleDateChange}
+              className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-2 px-3 rounded-xl font-mono`}
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-extrabold text-slate-400 block mb-1">2. เลือกเวลา (ชั่วโมง : นาที)</label>
+            <div className="flex items-center gap-2 bg-slate-800/20 p-2 rounded-xl border border-slate-700/30">
+              <select 
+                value={hourVal} 
+                onChange={handleHourChange}
+                className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5 px-2 rounded-lg font-mono font-bold text-center cursor-pointer`}
+              >
+                {Array.from({ length: 24 }, (_, i) => {
+                  const hStr = i.toString().padStart(2, '0');
+                  return <option key={hStr} value={hStr}>{hStr} : 00 น.</option>;
+                })}
+              </select>
+
+              <span className="font-bold text-base opacity-60">:</span>
+
+              <select 
+                value={minuteVal} 
+                onChange={handleMinuteChange}
+                className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5 px-2 rounded-lg font-mono font-bold text-center cursor-pointer`}
+              >
+                {Array.from({ length: 60 }, (_, i) => {
+                  const mStr = i.toString().padStart(2, '0');
+                  return <option key={mStr} value={mStr}>{mStr} นาที</option>;
+                })}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-2 border-t border-slate-700/40 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md cursor-pointer"
+            >
+              ตกลง (Done)
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const App = () => {
   const [activeTab, setActiveTab] = useState('cleanroom');
   const [latestData, setLatestData] = useState(null);
@@ -408,13 +566,13 @@ const App = () => {
         const parsedDate = new Date(dateStr);
         const displayTime = isNaN(parsedDate.getTime()) 
           ? (item.timestamp || '') 
-          : parsedDate.toLocaleString('en-US', { 
-              month: 'short', 
-              day: 'numeric', 
+          : parsedDate.toLocaleString('en-GB', { 
+              day: '2-digit',
+              month: '2-digit',
               hour: '2-digit', 
               minute: '2-digit',
               hour12: false
-            });
+            }).replace(',', '');
             
         return {
           ...item,
@@ -880,32 +1038,22 @@ const App = () => {
       </header>
 
       {/* Filters Card */}
-      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-5 mb-8 flex flex-col md:flex-row gap-4 items-center justify-between`}>
+      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-5 mb-8 flex flex-col md:flex-row gap-4 items-center justify-between relative z-30 overflow-visible`}>
         <div className="flex flex-wrap gap-4 items-center w-full md:w-auto">
           {/* Start Time */}
           <div className="flex flex-col gap-1 w-full md:w-auto">
-            <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-              <Calendar size={12} /> Start Date & Time
+            <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1 mb-0.5">
+              <Calendar size={12} /> Start Date & Time (24h)
             </span>
-            <input 
-              type="datetime-local" 
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full md:w-48`}
-            />
+            <DateTimePicker24h value={startTime} onChange={setStartTime} isDarkMode={isDarkMode} />
           </div>
 
           {/* End Time */}
           <div className="flex flex-col gap-1 w-full md:w-auto">
-            <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-              <Calendar size={12} /> End Date & Time
+            <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1 mb-0.5">
+              <Calendar size={12} /> End Date & Time (24h)
             </span>
-            <input 
-              type="datetime-local" 
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full md:w-48`}
-            />
+            <DateTimePicker24h value={endTime} onChange={setEndTime} isDarkMode={isDarkMode} />
           </div>
         </div>
 
@@ -1763,7 +1911,7 @@ const App = () => {
       {/* Custom PDF Export Modal */}
       {showPdfModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
-          <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-6 max-w-md w-full rounded-2xl shadow-2xl relative`}>
+          <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-6 max-w-md w-full rounded-2xl shadow-2xl relative max-h-[90vh] overflow-y-auto`}>
             <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-700/50">
               <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-500">
                 <FileText size={20} />
@@ -1807,14 +1955,14 @@ const App = () => {
               </label>
 
               {pdfRangeType === 'custom' && (
-                <div className="grid grid-cols-2 gap-3 mt-2 pl-6 pt-2 border-t border-slate-700/40">
+                <div className="flex flex-col gap-3 mt-2 pl-6 pt-2 border-t border-slate-700/40">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">เริ่มต้น</span>
-                    <input type="datetime-local" value={pdfStart} onChange={(e) => setPdfStart(e.target.value)} className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`} />
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">เริ่มต้น (24h)</span>
+                    <DateTimePicker24h value={pdfStart} onChange={setPdfStart} isDarkMode={isDarkMode} />
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">สิ้นสุด</span>
-                    <input type="datetime-local" value={pdfEnd} onChange={(e) => setPdfEnd(e.target.value)} className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`} />
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">สิ้นสุด (24h)</span>
+                    <DateTimePicker24h value={pdfEnd} onChange={setPdfEnd} isDarkMode={isDarkMode} />
                   </div>
                 </div>
               )}
@@ -1979,7 +2127,7 @@ const TVKioskView = ({ activeTab, setActiveTab, latestData, isSensorActive, curr
           </span>
         </div>
         <div className={`text-right text-lg font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-          {currentTime.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} — <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{currentTime.toLocaleTimeString()}</span>
+          {currentTime.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} — <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{currentTime.toLocaleTimeString('th-TH', { hour12: false })}</span>
         </div>
       </div>
     </div>

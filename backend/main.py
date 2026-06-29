@@ -1259,7 +1259,7 @@ def export_pdf_endpoint(
         
     first_actual = data[0].timestamp.strftime('%d/%m/%Y %H:%M') if data[0].timestamp else 'N/A'
     last_actual = data[-1].timestamp.strftime('%d/%m/%Y %H:%M') if data[-1].timestamp else 'N/A'
-    actual_range_str = f"{first_actual} ถึง {last_actual}"
+    actual_range_str = f"{first_actual} to {last_actual}"
     
     # Calculate stats
     metrics = []
@@ -1301,8 +1301,8 @@ def export_pdf_endpoint(
             "message": a.message or ''
         })
         
-    start_label = start_dt.strftime('%d/%m/%Y') if start_dt else "Beginning"
-    end_label = end_dt.strftime('%d/%m/%Y') if end_dt else "Present"
+    start_label = start_dt.strftime('%d/%m/%Y %H:%M') if start_dt else "Beginning"
+    end_label = end_dt.strftime('%d/%m/%Y %H:%M') if end_dt else "Present"
     
     extra_stats = {
         "metrics": metrics,
