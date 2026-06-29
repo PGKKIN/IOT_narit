@@ -125,38 +125,58 @@ const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDa
 };
 
 const CustomTooltip = ({ active, payload, label, isDarkMode }) => {
-  const formatValue = (val, name) => {
-    if (val === null || val === undefined) return '--';
-    if (Array.isArray(val)) {
-      const min = Number(val[0]);
-      const max = Number(val[1]);
-      if (isNaN(min) || isNaN(max)) return '--';
-      if (name && (name.toLowerCase().includes('co2') || name.toLowerCase().includes('tvoc'))) {
-        return `${min.toFixed(0)} - ${max.toFixed(0)}`;
-      }
-      return `${min.toFixed(1)} - ${max.toFixed(1)}`;
-    }
-    const num = Number(val);
-    if (isNaN(num)) return val;
+  const formatVal = (num, name) => {
+    if (num === null || num === undefined) return '--';
+    const val = Number(num);
+    if (isNaN(val)) return num;
     if (name && (name.toLowerCase().includes('co2') || name.toLowerCase().includes('tvoc'))) {
-      return num.toFixed(0);
+      return val.toFixed(0);
     }
-    return num.toFixed(1);
+    return val.toFixed(1);
   };
 
   if (active && payload && payload.length) {
+    const rawData = payload[0]?.payload || {};
     return (
-      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-4 max-w-xs shadow-xl`}>
-        <p className={`font-semibold mb-2 border-b pb-2 ${isDarkMode ? 'border-slate-700 text-gray-200' : 'border-slate-200 text-slate-800'}`}>{label}</p>
-        {payload.map((entry, index) => (
-          <div key={index} className="flex items-center gap-2 mb-1 text-sm">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
-            <span className={isDarkMode ? 'text-gray-400' : 'text-slate-500'}>{entry.name}:</span>
-            <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-              {formatValue(entry.value, entry.name)}
-            </span>
-          </div>
-        ))}
+      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-3.5 max-w-xs shadow-xl`}>
+        <p className={`font-semibold mb-2 border-b pb-1.5 text-xs ${isDarkMode ? 'border-slate-700 text-gray-200' : 'border-slate-200 text-slate-800'}`}>{label}</p>
+        {payload.map((entry, index) => {
+          if (entry.value === null || entry.value === undefined) return null;
+          
+          let minVal = null;
+          let maxVal = null;
+          if (entry.dataKey === 'temperature') {
+            minVal = rawData.min_temp; maxVal = rawData.max_temp;
+          } else if (entry.dataKey === 'humidity') {
+            minVal = rawData.min_hum; maxVal = rawData.max_hum;
+          } else if (entry.dataKey === 'dht_temp') {
+            minVal = rawData.min_dht_temp; maxVal = rawData.max_dht_temp;
+          } else if (entry.dataKey === 'dht_hum') {
+            minVal = rawData.min_dht_hum; maxVal = rawData.max_dht_hum;
+          }
+
+          const hasRange = minVal !== null && minVal !== undefined && maxVal !== null && maxVal !== undefined && minVal !== maxVal;
+
+          return (
+            <div key={index} className="mb-2 last:mb-0">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                  <span className={isDarkMode ? 'text-gray-300' : 'text-slate-600'}>{entry.name}:</span>
+                </div>
+                <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                  {formatVal(entry.value, entry.name)}
+                </span>
+              </div>
+              {hasRange && (
+                <div className={`text-[10px] pl-4 mt-0.5 font-mono flex justify-between ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <span>ช่วงผันผวน (Range):</span>
+                  <span>{formatVal(minVal, entry.name)} - {formatVal(maxVal, entry.name)}</span>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1039,7 +1059,6 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="tempRange" stroke="none" fill="#3b82f6" fillOpacity={0.12} name="Temp Range (°C)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="temperature" name="Temp (°C)" stroke="#3b82f6" strokeWidth={3} fill="url(#colorTemp)" dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(59, 130, 246, 0.35))' }} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1114,7 +1133,6 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="humRange" stroke="none" fill="#10b981" fillOpacity={0.12} name="Humidity Range (%)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="humidity" name="Humidity (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1287,7 +1305,6 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="dhtTempRange" stroke="none" fill="#3b82f6" fillOpacity={0.10} name="Ambient Temp Range (°C)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Line type="monotone" dataKey="dht_temp" name="DHT Ambient Temp (°C)" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#3b82f6', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(59, 130, 246, 0.35))' }} />
                     <Line type="monotone" dataKey="ds1_temp" name="Air Inlet (°C)" stroke="#22d3ee" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#22d3ee', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(34, 211, 238, 0.35))' }} />
                     <Line type="monotone" dataKey="ds2_temp" name="Optical Table 1 (°C)" stroke="#06b6d4" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#06b6d4', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 5px rgba(6, 182, 212, 0.35))' }} />
@@ -1365,7 +1382,6 @@ const App = () => {
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                    <Area type="monotone" dataKey="dhtHumRange" stroke="none" fill="#10b981" fillOpacity={0.12} name="Humidity Range (%)" legendType="none" activeDot={false} isAnimationActive={false} />
                     <Area type="monotone" dataKey="dht_hum" name="DHT Hum (%)" stroke="#10b981" strokeWidth={3} fill="url(#colorCleanHum)" dot={false} activeDot={{ r: 6, fill: '#10b981', stroke: isDarkMode ? '#0f172a' : '#fff', strokeWidth: 2 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35))' }} />
                   </AreaChart>
                 </ResponsiveContainer>

@@ -983,73 +983,88 @@ def get_data_history(
         else:
             res_minutes = 1440
             
-    bucket_size = res_minutes * 60
+    half_window_sec = (res_minutes * 60) / 2.0
+    half_window = timedelta(seconds=half_window_sec)
     
-    time_bucket = func.datetime(
-        func.cast(func.cast(func.strftime('%s', model.timestamp), models.Integer) / bucket_size, models.Integer) * bucket_size,
-        'unixepoch'
-    ).label("time_bucket")
+    fetch_start = start_datetime - half_window
+    fetch_end = end_datetime + half_window
     
-    if room == "fablab":
-        results = db.query(
-            time_bucket,
-            func.avg(model.temperature).label("temperature"),
-            func.min(model.temperature).label("min_temp"),
-            func.max(model.temperature).label("max_temp"),
-            func.avg(model.humidity).label("humidity"),
-            func.min(model.humidity).label("min_hum"),
-            func.max(model.humidity).label("max_hum"),
-            func.avg(model.eco2).label("eco2"),
-            func.avg(model.tvoc).label("tvoc")
-        ).filter(
-            model.timestamp >= start_datetime,
-            model.timestamp <= end_datetime
-        ).group_by("time_bucket").order_by("time_bucket").all()
+    raw_rows = db.query(model).filter(
+        model.timestamp >= fetch_start,
+        model.timestamp <= fetch_end
+    ).order_by(model.timestamp.asc()).all()
+    
+    # Align start_datetime to neat interval boundaries
+    bucket_step = timedelta(minutes=res_minutes)
+    current_bucket = start_datetime
+    
+    results = []
+    left_idx = 0
+    right_idx = 0
+    n = len(raw_rows)
+    
+    def calc_stats(vals, round_digits=2, default_val=0):
+        valid_vals = [v for v in vals if v is not None and v != 0.0]
+        if not valid_vals:
+            return default_val, default_val, default_val
+        avg_v = round(sum(valid_vals) / len(valid_vals), round_digits)
+        min_v = round(min(valid_vals), round_digits)
+        max_v = round(max(valid_vals), round_digits)
+        return avg_v, min_v, max_v
+
+    while current_bucket <= end_datetime:
+        w_start = current_bucket - half_window
+        w_end = current_bucket + half_window
         
-        return [
-            {
-                "timestamp": row.time_bucket,
-                "temperature": round(row.temperature, 2) if row.temperature else 0,
-                "min_temp": round(row.min_temp, 2) if row.min_temp else 0,
-                "max_temp": round(row.max_temp, 2) if row.max_temp else 0,
-                "humidity": round(row.humidity, 2) if row.humidity else 0,
-                "min_hum": round(row.min_hum, 2) if row.min_hum else 0,
-                "max_hum": round(row.max_hum, 2) if row.max_hum else 0,
-                "eco2": round(row.eco2, 0) if row.eco2 else 0,
-                "tvoc": round(row.tvoc, 0) if row.tvoc else 0
-            } for row in results if row.time_bucket is not None
-        ]
-    else:
-        results = db.query(
-            time_bucket,
-            func.avg(model.dht_temp).label("dht_temp"),
-            func.min(model.dht_temp).label("min_dht_temp"),
-            func.max(model.dht_temp).label("max_dht_temp"),
-            func.avg(model.dht_hum).label("dht_hum"),
-            func.min(model.dht_hum).label("min_dht_hum"),
-            func.max(model.dht_hum).label("max_dht_hum"),
-            func.avg(model.ds1_temp).label("ds1_temp"),
-            func.avg(model.ds2_temp).label("ds2_temp"),
-            func.avg(model.ds3_temp).label("ds3_temp")
-        ).filter(
-            model.timestamp >= start_datetime,
-            model.timestamp <= end_datetime
-        ).group_by("time_bucket").order_by("time_bucket").all()
+        while left_idx < n and raw_rows[left_idx].timestamp < w_start:
+            left_idx += 1
+        while right_idx < n and raw_rows[right_idx].timestamp <= w_end:
+            right_idx += 1
+            
+        window_rows = raw_rows[left_idx:right_idx]
         
-        return [
-            {
-                "timestamp": row.time_bucket,
-                "dht_temp": round(row.dht_temp, 2) if row.dht_temp else 0,
-                "min_dht_temp": round(row.min_dht_temp, 2) if row.min_dht_temp else 0,
-                "max_dht_temp": round(row.max_dht_temp, 2) if row.max_dht_temp else 0,
-                "dht_hum": round(row.dht_hum, 2) if row.dht_hum else 0,
-                "min_dht_hum": round(row.min_dht_hum, 2) if row.min_dht_hum else 0,
-                "max_dht_hum": round(row.max_dht_hum, 2) if row.max_dht_hum else 0,
-                "ds1_temp": round(row.ds1_temp, 2) if row.ds1_temp else 0,
-                "ds2_temp": round(row.ds2_temp, 2) if row.ds2_temp else 0,
-                "ds3_temp": round(row.ds3_temp, 2) if row.ds3_temp else 0
-            } for row in results if row.time_bucket is not None
-        ]
+        if window_rows:
+            time_str = current_bucket.strftime('%Y-%m-%d %H:%M:%S')
+            if room == "fablab":
+                avg_t, min_t, max_t = calc_stats([r.temperature for r in window_rows])
+                avg_h, min_h, max_h = calc_stats([r.humidity for r in window_rows])
+                avg_co2, _, _ = calc_stats([r.eco2 for r in window_rows], round_digits=0)
+                avg_tvoc, _, _ = calc_stats([r.tvoc for r in window_rows], round_digits=0)
+                
+                results.append({
+                    "timestamp": time_str,
+                    "temperature": avg_t,
+                    "min_temp": min_t,
+                    "max_temp": max_t,
+                    "humidity": avg_h,
+                    "min_hum": min_h,
+                    "max_hum": max_h,
+                    "eco2": avg_co2,
+                    "tvoc": avg_tvoc
+                })
+            else:
+                avg_dt, min_dt, max_dt = calc_stats([r.dht_temp for r in window_rows])
+                avg_dh, min_dh, max_dh = calc_stats([r.dht_hum for r in window_rows])
+                avg_ds1, _, _ = calc_stats([r.ds1_temp for r in window_rows])
+                avg_ds2, _, _ = calc_stats([r.ds2_temp for r in window_rows])
+                avg_ds3, _, _ = calc_stats([r.ds3_temp for r in window_rows])
+                
+                results.append({
+                    "timestamp": time_str,
+                    "dht_temp": avg_dt,
+                    "min_dht_temp": min_dt,
+                    "max_dht_temp": max_dt,
+                    "dht_hum": avg_dh,
+                    "min_dht_hum": min_dh,
+                    "max_dht_hum": max_dh,
+                    "ds1_temp": avg_ds1,
+                    "ds2_temp": avg_ds2,
+                    "ds3_temp": avg_ds3
+                })
+                
+        current_bucket += bucket_step
+        
+    return results
 
 @app.get("/data/{room}/export")
 def export_data(
