@@ -1214,6 +1214,23 @@ def update_config_endpoint(req: ConfigUpdateRequest):
         
     return {"status": "success", "message": "Thresholds and configuration updated successfully."}
 
+@app.get("/data/{room}/range-info")
+def get_room_range_info(room: str, db: Session = Depends(get_db)):
+    model = get_model_for_room(room)
+    first_rec = db.query(model).order_by(model.timestamp.asc()).first()
+    last_rec = db.query(model).order_by(model.timestamp.desc()).first()
+    count = db.query(model).count()
+    
+    if not first_rec or not last_rec:
+        return {"has_data": False, "message": "ไม่พบข้อมูลในระบบ"}
+        
+    return {
+        "has_data": True,
+        "first_date": first_rec.timestamp.strftime('%d/%m/%Y %H:%M') if first_rec.timestamp else '',
+        "last_date": last_rec.timestamp.strftime('%d/%m/%Y %H:%M') if last_rec.timestamp else '',
+        "total_records": count
+    }
+
 @app.get("/data/{room}/export-pdf")
 def export_pdf_endpoint(
     room: str,
@@ -1237,31 +1254,37 @@ def export_pdf_endpoint(
         
     data = query.order_by(model.timestamp.asc()).all()
     
+    if not data:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลในระบบตามช่วงเวลาที่เลือก ไม่สามารถสร้างรายงาน PDF ได้")
+        
+    first_actual = data[0].timestamp.strftime('%d/%m/%Y %H:%M') if data[0].timestamp else 'N/A'
+    last_actual = data[-1].timestamp.strftime('%d/%m/%Y %H:%M') if data[-1].timestamp else 'N/A'
+    actual_range_str = f"{first_actual} ถึง {last_actual}"
+    
     # Calculate stats
     metrics = []
-    if data:
-        if room == "fablab":
-            temps = [r.temperature for r in data if r.temperature and r.temperature != 0.0]
-            hums = [r.humidity for r in data if r.humidity and r.humidity != 0.0]
-            co2s = [r.eco2 for r in data if r.eco2 and r.eco2 != 0.0]
-            tvocs = [r.tvoc for r in data if r.tvoc and r.tvoc != 0.0]
-            
-            if temps: metrics.append({"name": "Temperature", "avg": round(sum(temps)/len(temps), 1), "min": round(min(temps), 1), "max": round(max(temps), 1), "unit": "°C"})
-            if hums: metrics.append({"name": "Humidity", "avg": round(sum(hums)/len(hums), 1), "min": round(min(hums), 1), "max": round(max(hums), 1), "unit": "%"})
-            if co2s: metrics.append({"name": "eCO2 Air Quality", "avg": round(sum(co2s)/len(co2s), 0), "min": round(min(co2s), 0), "max": round(max(co2s), 0), "unit": "ppm"})
-            if tvocs: metrics.append({"name": "TVOC Air Quality", "avg": round(sum(tvocs)/len(tvocs), 0), "min": round(min(tvocs), 0), "max": round(max(tvocs), 0), "unit": "ppb"})
-        else:
-            dht_t = [r.dht_temp for r in data if r.dht_temp and r.dht_temp != 0.0]
-            dht_h = [r.dht_hum for r in data if r.dht_hum and r.dht_hum != 0.0]
-            ds1 = [r.ds1_temp for r in data if r.ds1_temp and r.ds1_temp != 0.0]
-            ds2 = [r.ds2_temp for r in data if r.ds2_temp and r.ds2_temp != 0.0]
-            ds3 = [r.ds3_temp for r in data if r.ds3_temp and r.ds3_temp != 0.0]
-            
-            if dht_t: metrics.append({"name": "DHT Ambient Temp", "avg": round(sum(dht_t)/len(dht_t), 1), "min": round(min(dht_t), 1), "max": round(max(dht_t), 1), "unit": "°C"})
-            if dht_h: metrics.append({"name": "DHT Humidity", "avg": round(sum(dht_h)/len(dht_h), 1), "min": round(min(dht_h), 1), "max": round(max(dht_h), 1), "unit": "%"})
-            if ds1: metrics.append({"name": "Air Inlet Sensor", "avg": round(sum(ds1)/len(ds1), 1), "min": round(min(ds1), 1), "max": round(max(ds1), 1), "unit": "°C"})
-            if ds2: metrics.append({"name": "Optical Table 1", "avg": round(sum(ds2)/len(ds2), 1), "min": round(min(ds2), 1), "max": round(max(ds2), 1), "unit": "°C"})
-            if ds3: metrics.append({"name": "Optical Table 3", "avg": round(sum(ds3)/len(ds3), 1), "min": round(min(ds3), 1), "max": round(max(ds3), 1), "unit": "°C"})
+    if room == "fablab":
+        temps = [r.temperature for r in data if r.temperature and r.temperature != 0.0]
+        hums = [r.humidity for r in data if r.humidity and r.humidity != 0.0]
+        co2s = [r.eco2 for r in data if r.eco2 and r.eco2 != 0.0]
+        tvocs = [r.tvoc for r in data if r.tvoc and r.tvoc != 0.0]
+        
+        if temps: metrics.append({"name": "Temperature", "avg": round(sum(temps)/len(temps), 1), "min": round(min(temps), 1), "max": round(max(temps), 1), "unit": "°C"})
+        if hums: metrics.append({"name": "Humidity", "avg": round(sum(hums)/len(hums), 1), "min": round(min(hums), 1), "max": round(max(hums), 1), "unit": "%"})
+        if co2s: metrics.append({"name": "eCO2 Air Quality", "avg": round(sum(co2s)/len(co2s), 0), "min": round(min(co2s), 0), "max": round(max(co2s), 0), "unit": "ppm"})
+        if tvocs: metrics.append({"name": "TVOC Air Quality", "avg": round(sum(tvocs)/len(tvocs), 0), "min": round(min(tvocs), 0), "max": round(max(tvocs), 0), "unit": "ppb"})
+    else:
+        dht_t = [r.dht_temp for r in data if r.dht_temp and r.dht_temp != 0.0]
+        dht_h = [r.dht_hum for r in data if r.dht_hum and r.dht_hum != 0.0]
+        ds1 = [r.ds1_temp for r in data if r.ds1_temp and r.ds1_temp != 0.0]
+        ds2 = [r.ds2_temp for r in data if r.ds2_temp and r.ds2_temp != 0.0]
+        ds3 = [r.ds3_temp for r in data if r.ds3_temp and r.ds3_temp != 0.0]
+        
+        if dht_t: metrics.append({"name": "DHT Ambient Temp", "avg": round(sum(dht_t)/len(dht_t), 1), "min": round(min(dht_t), 1), "max": round(max(dht_t), 1), "unit": "°C"})
+        if dht_h: metrics.append({"name": "DHT Humidity", "avg": round(sum(dht_h)/len(dht_h), 1), "min": round(min(dht_h), 1), "max": round(max(dht_h), 1), "unit": "%"})
+        if ds1: metrics.append({"name": "Air Inlet Sensor", "avg": round(sum(ds1)/len(ds1), 1), "min": round(min(ds1), 1), "max": round(max(ds1), 1), "unit": "°C"})
+        if ds2: metrics.append({"name": "Optical Table 1", "avg": round(sum(ds2)/len(ds2), 1), "min": round(min(ds2), 1), "max": round(max(ds2), 1), "unit": "°C"})
+        if ds3: metrics.append({"name": "Optical Table 3", "avg": round(sum(ds3)/len(ds3), 1), "min": round(min(ds3), 1), "max": round(max(ds3), 1), "unit": "°C"})
 
     # Fetch alerts for this period
     alert_query = db.query(models.AlertLog)
@@ -1281,7 +1304,13 @@ def export_pdf_endpoint(
     start_label = start_dt.strftime('%d/%m/%Y') if start_dt else "Beginning"
     end_label = end_dt.strftime('%d/%m/%Y') if end_dt else "Present"
     
-    pdf_bytes = generate_pdf_report(room, start_label, end_label, {"metrics": metrics}, alerts_list)
+    extra_stats = {
+        "metrics": metrics,
+        "actual_range": actual_range_str,
+        "total_records": len(data)
+    }
+    
+    pdf_bytes = generate_pdf_report(room, start_label, end_label, extra_stats, alerts_list)
     
     file_start = start_dt.strftime('%d%m%Y') if start_dt else "Start"
     file_end = end_dt.strftime('%d%m%Y') if end_dt else "Now"

@@ -85,9 +85,11 @@ def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data
     # Room-specific Header Title
     room_title = "Cleanroom Environmental Monitoring Report" if room_name.lower() == "cleanroom" else "FabLab Environmental Monitoring Report"
     generated_now = datetime.now().strftime('%d/%m/%Y %H:%M')
+    actual_range = stats_data.get("actual_range", "-")
+    total_recs = stats_data.get("total_records", 0)
     
     elements.append(Paragraph(room_title, title_style))
-    elements.append(Paragraph(f"Range: <b>{start_str}</b> to <b>{end_str}</b> | Generated: <b>{generated_now}</b>", subtitle_style))
+    elements.append(Paragraph(f"Filter Range: <b>{start_str}</b> to <b>{end_str}</b> | Actual Data Range: <b>{actual_range}</b> ({total_recs:,} records) | Generated: <b>{generated_now}</b>", subtitle_style))
     elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#3b82f6'), spaceAfter=15))
     
     # Section 1: Statistical Summary

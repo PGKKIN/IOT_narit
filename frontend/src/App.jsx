@@ -36,7 +36,8 @@ import {
   Maximize2,
   Minimize2,
   CheckCircle2,
-  Save
+  Save,
+  Info
 } from 'lucide-react';
 
 const API_BASE_URL = `http://${window.location.hostname}:8000`;
@@ -209,6 +210,7 @@ const App = () => {
   const [pdfRangeType, setPdfRangeType] = useState('current_month');
   const [pdfStart, setPdfStart] = useState('');
   const [pdfEnd, setPdfEnd] = useState('');
+  const [rangeInfo, setRangeInfo] = useState(null);
   
   // Dynamic Threshold States
   const [threshCleanHum, setThreshCleanHum] = useState(60);
@@ -736,24 +738,40 @@ const App = () => {
     showToast("เริ่มดาวน์โหลดไฟล์ CSV เรียบร้อยแล้ว", "info");
   };
 
+  const handleOpenPdfModal = async () => {
+    setRangeInfo(null);
+    setShowPdfModal(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/data/${activeTab}/range-info`, { timeout: 3000 });
+      if (res.data) setRangeInfo(res.data);
+    } catch (e) {
+      console.error("Failed to fetch range info", e);
+    }
+  };
+
   const handleTriggerPdfDownload = () => {
     let sTime = '';
     let eTime = '';
     const now = new Date();
+    
+    const formatLocalISO = (d) => {
+      const pad = (n) => n.toString().padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
 
     if (pdfRangeType === 'current_month') {
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      sTime = firstDay.toISOString().slice(0, 16);
-      eTime = now.toISOString().slice(0, 16);
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      sTime = formatLocalISO(firstDay);
+      eTime = formatLocalISO(now);
     } else if (pdfRangeType === 'last_month') {
-      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59);
-      sTime = firstDay.toISOString().slice(0, 16);
-      eTime = lastDay.toISOString().slice(0, 16);
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      sTime = formatLocalISO(firstDay);
+      eTime = formatLocalISO(lastDay);
     } else if (pdfRangeType === '30d') {
       const past = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
-      sTime = past.toISOString().slice(0, 16);
-      eTime = now.toISOString().slice(0, 16);
+      sTime = formatLocalISO(past);
+      eTime = formatLocalISO(now);
     } else if (pdfRangeType === 'custom') {
       sTime = pdfStart;
       eTime = pdfEnd;
@@ -764,12 +782,10 @@ const App = () => {
     if (eTime) params.push(`end_time=${encodeURIComponent(eTime)}`);
     const queryString = params.length > 0 ? `?${params.join('&')}` : '';
 
-    const link = document.createElement('a');
-    link.href = `${API_BASE_URL}/data/${activeTab}/export-pdf${queryString}`;
-    link.setAttribute('download', '');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const downloadUrl = `${API_BASE_URL}/data/${activeTab}/export-pdf${queryString}`;
+    
+    // Open download in background/new tab safely to prevent browser navigation freezes
+    window.open(downloadUrl, '_blank');
 
     setShowPdfModal(false);
     showToast("กำลังสร้างและดาวน์โหลดไฟล์รายงาน PDF...", "info");
@@ -939,7 +955,7 @@ const App = () => {
             </button>
 
             <button 
-              onClick={() => setShowPdfModal(true)}
+              onClick={handleOpenPdfModal}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <FileText size={16} />
@@ -1756,7 +1772,18 @@ const App = () => {
               <button onClick={() => setShowPdfModal(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
-            <p className="text-xs opacity-80 mb-4">เลือกรูปแบบช่วงเวลาที่ต้องการสรุปสถิติและประวัติการแจ้งเตือนภัยลงไฟล์ PDF:</p>
+            <p className="text-xs opacity-80 mb-3">เลือกรูปแบบช่วงเวลาที่ต้องการสรุปสถิติและประวัติการแจ้งเตือนภัยลงไฟล์ PDF:</p>
+
+            {rangeInfo && rangeInfo.has_data && (
+              <div className={`p-3 rounded-xl mb-4 text-xs font-semibold border flex items-start gap-2.5 transition-all ${isDarkMode ? 'bg-blue-950/40 border-blue-800/60 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800 shadow-sm'}`}>
+                <Info size={16} className="flex-shrink-0 text-blue-500 mt-0.5" />
+                <div>
+                  <div className="font-bold mb-0.5 text-blue-400">ประวัติข้อมูลที่มีในระบบสำหรับ {activeTab === 'fablab' ? 'FabLab' : 'Cleanroom'}:</div>
+                  <div className="font-mono text-[11px] text-emerald-400">📅 {rangeInfo.first_date} ถึง {rangeInfo.last_date}</div>
+                  <div className="opacity-70 text-[10px] mt-0.5">(รวมทั้งหมด {rangeInfo.total_records.toLocaleString()} รายการบันทึก)</div>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-col gap-3 mb-6">
               <label className="flex items-center gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-700/40 hover:bg-slate-800/30">
