@@ -6,9 +6,10 @@
   "recipient_emails": [
     "kandanaikid@gmail.com"
   ],
-  "humidity_threshold_cleanroom": 60.0,
+  "humidity_threshold_cleanroom": 80.0,
   "humidity_threshold_fablab": 65.0,
   "alert_cooldown_minutes": 30,
   "daily_summary_time": "08:30",
-  "recipient_email": "copphotonicchip@gmail.com"
+  "recipient_email": "copphotonicchip@gmail.com",
+  "temp_threshold_high": 40.0
 }

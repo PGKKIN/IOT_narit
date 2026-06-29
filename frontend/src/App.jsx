@@ -29,7 +29,14 @@ import {
   Sliders,
   Mail,
   Plus,
-  Trash2
+  Trash2,
+  RefreshCw,
+  FileText,
+  Tv,
+  Maximize2,
+  Minimize2,
+  CheckCircle2,
+  Save
 } from 'lucide-react';
 
 const API_BASE_URL = `http://${window.location.hostname}:8000`;
@@ -196,6 +203,19 @@ const App = () => {
   const [newEmail, setNewEmail] = useState('');
   const [toasts, setToasts] = useState([]);
 
+  // New Feature States: TV Kiosk Mode, Dynamic Thresholds, PDF Export Modal
+  const [isKioskMode, setIsKioskMode] = useState(false);
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfRangeType, setPdfRangeType] = useState('current_month');
+  const [pdfStart, setPdfStart] = useState('');
+  const [pdfEnd, setPdfEnd] = useState('');
+  
+  // Dynamic Threshold States
+  const [threshCleanHum, setThreshCleanHum] = useState(60);
+  const [threshFabHum, setThreshFabHum] = useState(65);
+  const [threshTempHigh, setThreshTempHigh] = useState(40);
+  const [isSavingThresh, setIsSavingThresh] = useState(false);
+
   const showToast = (message, type = 'success') => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, message, type }]);
@@ -203,6 +223,41 @@ const App = () => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3500);
   };
+
+  // Fetch Config (Thresholds + Emails)
+  const fetchConfigData = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/config`);
+      if (res.data) {
+        if (res.data.recipient_emails) setRecipientEmails(res.data.recipient_emails);
+        if (res.data.humidity_threshold_cleanroom !== undefined) setThreshCleanHum(res.data.humidity_threshold_cleanroom);
+        if (res.data.humidity_threshold_fablab !== undefined) setThreshFabHum(res.data.humidity_threshold_fablab);
+        if (res.data.temp_threshold_high !== undefined) setThreshTempHigh(res.data.temp_threshold_high);
+      }
+    } catch (e) {
+      console.error("Failed to fetch config data", e);
+    }
+  };
+
+  const handleSaveThresholds = async () => {
+    setIsSavingThresh(true);
+    try {
+      await axios.post(`${API_BASE_URL}/config`, {
+        humidity_threshold_cleanroom: parseFloat(threshCleanHum),
+        humidity_threshold_fablab: parseFloat(threshFabHum),
+        temp_threshold_high: parseFloat(threshTempHigh)
+      });
+      showToast(`บันทึกสำเร็จ! เกณฑ์ปัจจุบัน: Cleanroom Hum ${threshCleanHum}%, FabLab Hum ${threshFabHum}%, Max Temp ${threshTempHigh}°C`, "success");
+    } catch (e) {
+      showToast("เกิดข้อผิดพลาดในการบันทึกเกณฑ์", "danger");
+    } finally {
+      setIsSavingThresh(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConfigData();
+  }, []);
 
   // Chart Axis Limit States (Custom yMin/yMax settings)
   const [tempYMin, setTempYMin] = useState('');
@@ -681,6 +736,45 @@ const App = () => {
     showToast("เริ่มดาวน์โหลดไฟล์ CSV เรียบร้อยแล้ว", "info");
   };
 
+  const handleTriggerPdfDownload = () => {
+    let sTime = '';
+    let eTime = '';
+    const now = new Date();
+
+    if (pdfRangeType === 'current_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      sTime = firstDay.toISOString().slice(0, 16);
+      eTime = now.toISOString().slice(0, 16);
+    } else if (pdfRangeType === 'last_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59);
+      sTime = firstDay.toISOString().slice(0, 16);
+      eTime = lastDay.toISOString().slice(0, 16);
+    } else if (pdfRangeType === '30d') {
+      const past = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+      sTime = past.toISOString().slice(0, 16);
+      eTime = now.toISOString().slice(0, 16);
+    } else if (pdfRangeType === 'custom') {
+      sTime = pdfStart;
+      eTime = pdfEnd;
+    }
+
+    const params = [];
+    if (sTime) params.push(`start_time=${encodeURIComponent(sTime)}`);
+    if (eTime) params.push(`end_time=${encodeURIComponent(eTime)}`);
+    const queryString = params.length > 0 ? `?${params.join('&')}` : '';
+
+    const link = document.createElement('a');
+    link.href = `${API_BASE_URL}/data/${activeTab}/export-pdf${queryString}`;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setShowPdfModal(false);
+    showToast("กำลังสร้างและดาวน์โหลดไฟล์รายงาน PDF...", "info");
+  };
+
   const getTempDomain = (defaultMin = 10, defaultMax = 40) => {
     const minVal = tempYMin !== '' ? parseFloat(tempYMin) : null;
     const maxVal = tempYMax !== '' ? parseFloat(tempYMax) : null;
@@ -748,14 +842,25 @@ const App = () => {
           </div>
         </div>
         
-        {/* Toggle Mode */}
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className={`theme-btn ${isDarkMode ? 'dark' : 'light'} p-2.5 rounded-full flex items-center justify-center`}
-          title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-        >
-          {isDarkMode ? <Sun size={20} className="text-yellow-400" /> : <Moon size={20} className="text-blue-600" />}
-        </button>
+        {/* Top Action Controls */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsKioskMode(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+            title="Open Fullscreen TV Kiosk Display Mode"
+          >
+            <Tv size={16} />
+            TV Kiosk Mode
+          </button>
+          
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`theme-btn ${isDarkMode ? 'dark' : 'light'} p-2.5 rounded-full flex items-center justify-center`}
+            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDarkMode ? <Sun size={20} className="text-yellow-400" /> : <Moon size={20} className="text-blue-600" />}
+          </button>
+        </div>
       </header>
 
       {/* Filters Card */}
@@ -786,8 +891,6 @@ const App = () => {
               className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full md:w-48`}
             />
           </div>
-
-
         </div>
 
         <div className="flex gap-3 w-full md:w-auto justify-end">
@@ -805,7 +908,7 @@ const App = () => {
             </button>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap md:flex-nowrap">
             {/* Quick selector (only visible if custom dates are not set) */}
             {!startTime && !endTime && (
               <select 
@@ -832,7 +935,15 @@ const App = () => {
               className={`theme-btn ${isDarkMode ? 'dark' : 'light'}`}
             >
               <Download size={16} />
-              Export CSV
+              CSV
+            </button>
+
+            <button 
+              onClick={() => setShowPdfModal(true)}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+            >
+              <FileText size={16} />
+              Export PDF
             </button>
           </div>
         </div>
@@ -1557,6 +1668,158 @@ const App = () => {
           )}
         </div>
       </div>
+
+      {/* Dynamic Threshold Settings Section */}
+      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 mt-8`}>
+        <h2 className={`text-xl font-semibold mb-4 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+          <Sliders className="text-emerald-500" size={24} />
+          ตั้งค่าเกณฑ์แจ้งเตือนระบบ (Dynamic Threshold Settings)
+        </h2>
+        <p className={`text-xs mb-4 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+          กำหนดเกณฑ์ความชื้นและอุณหภูมิสำหรับแจ้งเตือนระบบอัตโนมัติ การบันทึกจะมีผลทันทีโดยไม่ต้องรีสตาร์ทเซิร์ฟเวอร์
+        </p>
+
+        {/* Active Threshold Status Summary Banner */}
+        <div className={`p-3.5 rounded-xl mb-6 border flex flex-wrap gap-3 items-center justify-between text-xs font-semibold transition-all ${isDarkMode ? 'bg-slate-800/50 border-slate-700/60 text-gray-200' : 'bg-slate-50 border-slate-200 text-slate-800 shadow-sm'}`}>
+          <span className="flex items-center gap-1.5 text-emerald-500 font-bold">
+            <CheckCircle2 size={16} /> เกณฑ์ปัจจุบันที่ใช้งานอยู่ (Active System Limits):
+          </span>
+          <div className="flex flex-wrap gap-2 font-mono">
+            <span className="px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-500 border border-blue-500/20">Cleanroom Hum: <b>{threshCleanHum}%</b></span>
+            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">FabLab Hum: <b>{threshFabHum}%</b></span>
+            <span className="px-2.5 py-1 rounded-md bg-red-500/10 text-red-500 border border-red-500/20">Max Temp: <b>{threshTempHigh}°C</b></span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider opacity-80 flex items-center gap-1.5">
+              <Droplets size={14} className="text-blue-500" /> Cleanroom Humidity Limit (%)
+            </label>
+            <input 
+              type="number" 
+              value={threshCleanHum} 
+              onChange={(e) => setThreshCleanHum(e.target.value)} 
+              className={`theme-input ${isDarkMode ? 'dark' : 'light'} py-2 text-sm font-semibold`}
+              step="0.5"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider opacity-80 flex items-center gap-1.5">
+              <Droplets size={14} className="text-emerald-500" /> FabLab Humidity Limit (%)
+            </label>
+            <input 
+              type="number" 
+              value={threshFabHum} 
+              onChange={(e) => setThreshFabHum(e.target.value)} 
+              className={`theme-input ${isDarkMode ? 'dark' : 'light'} py-2 text-sm font-semibold`}
+              step="0.5"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider opacity-80 flex items-center gap-1.5">
+              <Thermometer size={14} className="text-red-500" /> Max Temp Safety Limit (°C)
+            </label>
+            <input 
+              type="number" 
+              value={threshTempHigh} 
+              onChange={(e) => setThreshTempHigh(e.target.value)} 
+              className={`theme-input ${isDarkMode ? 'dark' : 'light'} py-2 text-sm font-semibold`}
+              step="0.5"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-6 pt-4 border-t border-slate-700/40">
+          <button
+            onClick={handleSaveThresholds}
+            disabled={isSavingThresh}
+            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+          >
+            <Save size={16} />
+            {isSavingThresh ? 'กำลังบันทึก...' : 'บันทึกเกณฑ์การแจ้งเตือน (Save Settings)'}
+          </button>
+        </div>
+      </div>
+
+      {/* Custom PDF Export Modal */}
+      {showPdfModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} border p-6 max-w-md w-full rounded-2xl shadow-2xl relative`}>
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-700/50">
+              <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-500">
+                <FileText size={20} />
+                ส่งออกรายงาน PDF (Export PDF Report)
+              </h3>
+              <button onClick={() => setShowPdfModal(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+
+            <p className="text-xs opacity-80 mb-4">เลือกรูปแบบช่วงเวลาที่ต้องการสรุปสถิติและประวัติการแจ้งเตือนภัยลงไฟล์ PDF:</p>
+
+            <div className="flex flex-col gap-3 mb-6">
+              <label className="flex items-center gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-700/40 hover:bg-slate-800/30">
+                <input type="radio" name="pdfRange" value="current_month" checked={pdfRangeType === 'current_month'} onChange={(e) => setPdfRangeType(e.target.value)} />
+                <span>สรุปผลเดือนปัจจุบัน (Current Month)</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-700/40 hover:bg-slate-800/30">
+                <input type="radio" name="pdfRange" value="last_month" checked={pdfRangeType === 'last_month'} onChange={(e) => setPdfRangeType(e.target.value)} />
+                <span>สรุปผลเดือนที่แล้ว (Previous Month)</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-700/40 hover:bg-slate-800/30">
+                <input type="radio" name="pdfRange" value="30d" checked={pdfRangeType === '30d'} onChange={(e) => setPdfRangeType(e.target.value)} />
+                <span>สรุปผลย้อนหลัง 30 วัน (Last 30 Days)</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-700/40 hover:bg-slate-800/30">
+                <input type="radio" name="pdfRange" value="custom" checked={pdfRangeType === 'custom'} onChange={(e) => setPdfRangeType(e.target.value)} />
+                <span>กำหนดช่วงวันเอง (Custom Date Range)</span>
+              </label>
+
+              {pdfRangeType === 'custom' && (
+                <div className="grid grid-cols-2 gap-3 mt-2 pl-6 pt-2 border-t border-slate-700/40">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">เริ่มต้น</span>
+                    <input type="datetime-local" value={pdfStart} onChange={(e) => setPdfStart(e.target.value)} className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">สิ้นสุด</span>
+                    <input type="datetime-local" value={pdfEnd} onChange={(e) => setPdfEnd(e.target.value)} className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-700/40">
+              <button onClick={() => setShowPdfModal(false)} className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white cursor-pointer">ยกเลิก</button>
+              <button onClick={handleTriggerPdfDownload} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer">
+                <Download size={14} /> ดาวน์โหลด PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TV Kiosk Mode Render */}
+      {isKioskMode && (
+        <TVKioskView 
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          latestData={latestData}
+          isSensorActive={isSensorActive}
+          currentTime={currentTime}
+          setIsKioskMode={setIsKioskMode}
+          threshCleanHum={threshCleanHum}
+          threshFabHum={threshFabHum}
+          threshTempHigh={threshTempHigh}
+          isDarkMode={isDarkMode}
+          setIsDarkMode={setIsDarkMode}
+        />
+      )}
+
       {/* Dynamic Toast Notifications */}
       <div className="toast-container">
         {toasts.map(t => (
@@ -1567,6 +1830,130 @@ const App = () => {
             <span className="text-sm font-medium">{t.message}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+};
+
+const TVKioskView = ({ activeTab, setActiveTab, latestData, isSensorActive, currentTime, setIsKioskMode, threshCleanHum, threshFabHum, threshTempHigh, isDarkMode, setIsDarkMode }) => {
+  const isFab = activeTab === 'fablab';
+  const limitHum = isFab ? threshFabHum : threshCleanHum;
+
+  let hasBreach = false;
+  if (isFab) {
+    if (latestData?.temperature > threshTempHigh || latestData?.humidity > limitHum) hasBreach = true;
+  } else {
+    if (latestData?.dht_temp > threshTempHigh || latestData?.dht_hum > limitHum || latestData?.ds1_temp > threshTempHigh || latestData?.ds2_temp > threshTempHigh || latestData?.ds3_temp > threshTempHigh) hasBreach = true;
+  }
+
+  return (
+    <div className={`fixed inset-0 z-50 p-8 flex flex-col justify-between overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-900'}`}>
+      {/* Top Header */}
+      <div className={`flex justify-between items-center border-b pb-6 ${isDarkMode ? 'border-slate-800' : 'border-slate-300'}`}>
+        <div className="flex items-center gap-4">
+          <div className={`p-3.5 rounded-2xl ${hasBreach ? 'bg-red-500/20 text-red-500 border border-red-500/30 animate-pulse' : 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30'}`}>
+            <Activity size={32} />
+          </div>
+          <div>
+            <h1 className={`text-3xl font-black tracking-wider uppercase bg-clip-text text-transparent ${isDarkMode ? 'bg-gradient-to-r from-blue-400 to-emerald-400' : 'bg-gradient-to-r from-blue-600 to-emerald-600'}`}>
+              {isFab ? 'FabLab Environmental Kiosk' : 'Cleanroom Monitoring Kiosk'}
+            </h1>
+            <p className={`text-sm flex items-center gap-2 mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600 font-semibold'}`}>
+              <span className={`inline-block w-3 h-3 rounded-full ${isSensorActive ? 'bg-emerald-500 animate-ping' : 'bg-red-500'}`} />
+              {isSensorActive ? 'REAL-TIME SENSOR STREAM CONNECTED' : 'SENSOR HARDWARE OFFLINE'}
+            </p>
+          </div>
+        </div>
+
+        {/* Action Controls & Theme Toggle */}
+        <div className="flex items-center gap-4">
+          <div className={`p-1.5 rounded-xl border flex gap-2 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-300 shadow-md'}`}>
+            <button onClick={() => setActiveTab('cleanroom')} className={`px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${!isFab ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>Cleanroom</button>
+            <button onClick={() => setActiveTab('fablab')} className={`px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${isFab ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>FabLab</button>
+          </div>
+
+          {/* Theme Toggle Button */}
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`p-3 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-yellow-400 hover:bg-slate-800' : 'bg-white border-slate-300 text-blue-600 hover:bg-slate-100 shadow-md'
+            }`}
+            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDarkMode ? <Sun size={22} /> : <Moon size={22} />}
+          </button>
+
+          <button onClick={() => setIsKioskMode(false)} className={`p-3.5 rounded-xl border transition-all flex items-center gap-2 font-bold text-sm cursor-pointer ${isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-md'}`}>
+            <Minimize2 size={20} /> Exit Kiosk
+          </button>
+        </div>
+      </div>
+
+      {/* Main Grid Metrics - 4 Corners Layout with Massive Typography */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 my-auto py-6 w-full">
+        {isFab ? (
+          <>
+            <div className={`p-8 lg:p-10 rounded-3xl border backdrop-blur-xl transition-all flex flex-col justify-between min-h-[220px] ${latestData?.temperature > threshTempHigh ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-blue-400' : 'bg-white/90 border-slate-200 text-blue-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Temperature</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.temperature ? latestData.temperature.toFixed(1) : '--'}<span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>°C</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshTempHigh}°C</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border backdrop-blur-xl transition-all flex flex-col justify-between min-h-[220px] ${latestData?.humidity > threshFabHum ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-emerald-400' : 'bg-white/90 border-slate-200 text-emerald-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Relative Humidity</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.humidity ? latestData.humidity.toFixed(1) : '--'}<span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>%</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshFabHum}%</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border transition-all flex flex-col justify-between min-h-[220px] ${isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-purple-400' : 'bg-white/90 border-slate-200 text-purple-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>eCO2 Air Quality</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.eco2 ?? '--'}<span className={`text-4xl lg:text-5xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>ppm</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Target: &lt; 1000 ppm</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border transition-all flex flex-col justify-between min-h-[220px] ${isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-amber-400' : 'bg-white/90 border-slate-200 text-amber-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>TVOC Gas Index</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.tvoc ?? '--'}<span className={`text-4xl lg:text-5xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>ppb</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Target: &lt; 500 ppb</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={`p-8 lg:p-10 rounded-3xl border backdrop-blur-xl transition-all flex flex-col justify-between min-h-[220px] ${latestData?.dht_temp > threshTempHigh ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-blue-400' : 'bg-white/90 border-slate-200 text-blue-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Ambient Temp (DHT)</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.dht_temp ? latestData.dht_temp.toFixed(1) : '--'}<span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>°C</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshTempHigh}°C</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border backdrop-blur-xl transition-all flex flex-col justify-between min-h-[220px] ${latestData?.dht_hum > threshCleanHum ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-emerald-400' : 'bg-white/90 border-slate-200 text-emerald-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Cleanroom Humidity</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.dht_hum ? latestData.dht_hum.toFixed(1) : '--'}<span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>%</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshCleanHum}%</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border transition-all flex flex-col justify-between min-h-[220px] ${latestData?.ds1_temp > threshTempHigh ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-cyan-400' : 'bg-white/90 border-slate-200 text-cyan-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Air Inlet Sensor</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">{latestData?.ds1_temp ? latestData.ds1_temp.toFixed(1) : '--'}<span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>°C</span></div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshTempHigh}°C</span>
+            </div>
+            <div className={`p-8 lg:p-10 rounded-3xl border transition-all flex flex-col justify-between min-h-[220px] ${((latestData?.ds2_temp + latestData?.ds3_temp)/2) > threshTempHigh ? 'bg-red-500/10 border-red-500/50 text-red-500' : isDarkMode ? 'bg-slate-900/60 border-slate-800/80 text-teal-400' : 'bg-white/90 border-slate-200 text-teal-600 shadow-xl'}`}>
+              <span className={`text-base lg:text-lg uppercase font-extrabold tracking-widest block ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Optical Table Average</span>
+              <div className="text-8xl lg:text-9xl font-black my-4 tracking-tight flex items-baseline">
+                {latestData?.ds2_temp && latestData?.ds3_temp ? ((latestData.ds2_temp + latestData.ds3_temp)/2).toFixed(1) : '--'}
+                <span className={`text-5xl lg:text-6xl font-normal ml-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>°C</span>
+              </div>
+              <span className={`text-sm lg:text-base font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Limit: Max {threshTempHigh}°C</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Footer Banner */}
+      <div className={`flex justify-between items-center border-t pt-6 ${isDarkMode ? 'border-slate-800' : 'border-slate-300'}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-4 h-4 rounded-full ${hasBreach ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
+          <span className={`text-xl font-bold tracking-wide ${hasBreach ? 'text-red-500' : isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>
+            {hasBreach ? '⚠️ ALERT BREACH DETECTED — CHECK HVAC / SENSORS' : '✅ SYSTEM ENVIRONMENT STABLE & WITHIN LIMITS'}
+          </span>
+        </div>
+        <div className={`text-right text-lg font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+          {currentTime.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} — <span className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{currentTime.toLocaleTimeString()}</span>
+        </div>
       </div>
     </div>
   );

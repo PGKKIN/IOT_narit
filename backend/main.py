@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
@@ -42,6 +44,8 @@ config = {
     "recipient_emails": ["copphotonicchip@gmail.com"],
     "humidity_threshold_cleanroom": 60.0,
     "humidity_threshold_fablab": 65.0,
+    "temp_threshold_high": 40.0,
+    "temp_threshold_low": 10.0,
     "alert_cooldown_minutes": 30,
     "daily_summary_time": "08:30"
 }
@@ -72,6 +76,18 @@ if os.path.exists(CONFIG_PATH):
         print("[Config] SMTP and alert configurations loaded successfully.")
     except Exception as e:
         print(f"Error loading config.json: {e}")
+
+# Bind global threshold variables explicitly to persistent config
+humidity_threshold_cleanroom = config.get("humidity_threshold_cleanroom", 60.0)
+humidity_threshold_fablab = config.get("humidity_threshold_fablab", 65.0)
+temp_threshold_high = config.get("temp_threshold_high", 40.0)
+temp_threshold_low = config.get("temp_threshold_low", 10.0)
+alert_cooldown_minutes = config.get("alert_cooldown_minutes", 30)
+daily_summary_time = config.get("daily_summary_time", "08:30")
+recipient_emails = config.get("recipient_emails", ["copphotonicchip@gmail.com"])
+smtp_server = config.get("smtp_server", "smtp.gmail.com")
+smtp_port = config.get("smtp_port", 465)
+smtp_email = config.get("smtp_email", "copphotonicchip@gmail.com")
 
 last_alert_sent = {
     "cleanroom": None,
@@ -1122,4 +1138,157 @@ def export_data(
         'Content-Disposition': f'attachment; filename="{filename}"'
     }
     return Response(content=output.getvalue(), media_type='text/csv', headers=headers)
+
+@app.get("/config")
+def get_config_endpoint():
+    cfg = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            print(f"Error reading config.json in get_config: {e}")
+            
+    return {
+        "smtp_server": cfg.get("smtp_server", smtp_server),
+        "smtp_port": cfg.get("smtp_port", smtp_port),
+        "smtp_email": cfg.get("smtp_email", smtp_email),
+        "recipient_emails": cfg.get("recipient_emails", recipient_emails),
+        "humidity_threshold_cleanroom": cfg.get("humidity_threshold_cleanroom", humidity_threshold_cleanroom),
+        "humidity_threshold_fablab": cfg.get("humidity_threshold_fablab", humidity_threshold_fablab),
+        "temp_threshold_high": cfg.get("temp_threshold_high", temp_threshold_high),
+        "temp_threshold_low": cfg.get("temp_threshold_low", temp_threshold_low),
+        "alert_cooldown_minutes": cfg.get("alert_cooldown_minutes", alert_cooldown_minutes),
+        "daily_summary_time": cfg.get("daily_summary_time", daily_summary_time)
+    }
+
+class ConfigUpdateRequest(BaseModel):
+    humidity_threshold_cleanroom: Optional[float] = None
+    humidity_threshold_fablab: Optional[float] = None
+    temp_threshold_high: Optional[float] = None
+    temp_threshold_low: Optional[float] = None
+    alert_cooldown_minutes: Optional[int] = None
+    daily_summary_time: Optional[str] = None
+    recipient_emails: Optional[List[str]] = None
+
+@app.post("/config")
+def update_config_endpoint(req: ConfigUpdateRequest):
+    global humidity_threshold_cleanroom, humidity_threshold_fablab, temp_threshold_high, temp_threshold_low
+    global alert_cooldown_minutes, daily_summary_time, recipient_emails
+    
+    current_cfg = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                current_cfg = json.load(f)
+        except Exception as e:
+            print(f"Error reading config: {e}")
+            
+    if req.humidity_threshold_cleanroom is not None:
+        humidity_threshold_cleanroom = req.humidity_threshold_cleanroom
+        current_cfg["humidity_threshold_cleanroom"] = req.humidity_threshold_cleanroom
+    if req.humidity_threshold_fablab is not None:
+        humidity_threshold_fablab = req.humidity_threshold_fablab
+        current_cfg["humidity_threshold_fablab"] = req.humidity_threshold_fablab
+    if req.temp_threshold_high is not None:
+        temp_threshold_high = req.temp_threshold_high
+        current_cfg["temp_threshold_high"] = req.temp_threshold_high
+    if req.temp_threshold_low is not None:
+        temp_threshold_low = req.temp_threshold_low
+        current_cfg["temp_threshold_low"] = req.temp_threshold_low
+    if req.alert_cooldown_minutes is not None:
+        alert_cooldown_minutes = req.alert_cooldown_minutes
+        current_cfg["alert_cooldown_minutes"] = req.alert_cooldown_minutes
+    if req.daily_summary_time is not None:
+        daily_summary_time = req.daily_summary_time
+        current_cfg["daily_summary_time"] = req.daily_summary_time
+    if req.recipient_emails is not None:
+        recipient_emails = req.recipient_emails
+        current_cfg["recipient_emails"] = req.recipient_emails
+        
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(current_cfg, f, indent=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write config.json: {e}")
+        
+    return {"status": "success", "message": "Thresholds and configuration updated successfully."}
+
+@app.get("/data/{room}/export-pdf")
+def export_pdf_endpoint(
+    room: str,
+    start_time: str = Query(None),
+    end_time: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    from pdf_generator import generate_pdf_report
+    model = get_model_for_room(room)
+    query = db.query(model)
+    
+    start_dt = None
+    end_dt = None
+    
+    if start_time:
+        start_dt = parse_iso_datetime(start_time)
+        query = query.filter(model.timestamp >= start_dt)
+    if end_time:
+        end_dt = parse_iso_datetime(end_time)
+        query = query.filter(model.timestamp <= end_dt)
+        
+    data = query.order_by(model.timestamp.asc()).all()
+    
+    # Calculate stats
+    metrics = []
+    if data:
+        if room == "fablab":
+            temps = [r.temperature for r in data if r.temperature and r.temperature != 0.0]
+            hums = [r.humidity for r in data if r.humidity and r.humidity != 0.0]
+            co2s = [r.eco2 for r in data if r.eco2 and r.eco2 != 0.0]
+            tvocs = [r.tvoc for r in data if r.tvoc and r.tvoc != 0.0]
+            
+            if temps: metrics.append({"name": "Temperature", "avg": round(sum(temps)/len(temps), 1), "min": round(min(temps), 1), "max": round(max(temps), 1), "unit": "°C"})
+            if hums: metrics.append({"name": "Humidity", "avg": round(sum(hums)/len(hums), 1), "min": round(min(hums), 1), "max": round(max(hums), 1), "unit": "%"})
+            if co2s: metrics.append({"name": "eCO2 Air Quality", "avg": round(sum(co2s)/len(co2s), 0), "min": round(min(co2s), 0), "max": round(max(co2s), 0), "unit": "ppm"})
+            if tvocs: metrics.append({"name": "TVOC Air Quality", "avg": round(sum(tvocs)/len(tvocs), 0), "min": round(min(tvocs), 0), "max": round(max(tvocs), 0), "unit": "ppb"})
+        else:
+            dht_t = [r.dht_temp for r in data if r.dht_temp and r.dht_temp != 0.0]
+            dht_h = [r.dht_hum for r in data if r.dht_hum and r.dht_hum != 0.0]
+            ds1 = [r.ds1_temp for r in data if r.ds1_temp and r.ds1_temp != 0.0]
+            ds2 = [r.ds2_temp for r in data if r.ds2_temp and r.ds2_temp != 0.0]
+            ds3 = [r.ds3_temp for r in data if r.ds3_temp and r.ds3_temp != 0.0]
+            
+            if dht_t: metrics.append({"name": "DHT Ambient Temp", "avg": round(sum(dht_t)/len(dht_t), 1), "min": round(min(dht_t), 1), "max": round(max(dht_t), 1), "unit": "°C"})
+            if dht_h: metrics.append({"name": "DHT Humidity", "avg": round(sum(dht_h)/len(dht_h), 1), "min": round(min(dht_h), 1), "max": round(max(dht_h), 1), "unit": "%"})
+            if ds1: metrics.append({"name": "Air Inlet Sensor", "avg": round(sum(ds1)/len(ds1), 1), "min": round(min(ds1), 1), "max": round(max(ds1), 1), "unit": "°C"})
+            if ds2: metrics.append({"name": "Optical Table 1", "avg": round(sum(ds2)/len(ds2), 1), "min": round(min(ds2), 1), "max": round(max(ds2), 1), "unit": "°C"})
+            if ds3: metrics.append({"name": "Optical Table 3", "avg": round(sum(ds3)/len(ds3), 1), "min": round(min(ds3), 1), "max": round(max(ds3), 1), "unit": "°C"})
+
+    # Fetch alerts for this period
+    alert_query = db.query(models.AlertLog)
+    if start_dt: alert_query = alert_query.filter(models.AlertLog.timestamp >= start_dt)
+    if end_dt: alert_query = alert_query.filter(models.AlertLog.timestamp <= end_dt)
+    alerts = alert_query.order_by(models.AlertLog.timestamp.desc()).all()
+    
+    alerts_list = []
+    for a in alerts:
+        alerts_list.append({
+            "timestamp": a.timestamp.strftime('%d/%m/%Y %H:%M') if a.timestamp else '',
+            "sensor": a.sensor or '',
+            "value": a.value or 0,
+            "message": a.message or ''
+        })
+        
+    start_label = start_dt.strftime('%d/%m/%Y') if start_dt else "Beginning"
+    end_label = end_dt.strftime('%d/%m/%Y') if end_dt else "Present"
+    
+    pdf_bytes = generate_pdf_report(room, start_label, end_label, {"metrics": metrics}, alerts_list)
+    
+    file_start = start_dt.strftime('%d%m%Y') if start_dt else "Start"
+    file_end = end_dt.strftime('%d%m%Y') if end_dt else "Now"
+    filename = f"Report_{room.capitalize()}_{file_start}_to_{file_end}.pdf"
+    headers = {
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    }
+    return Response(content=pdf_bytes, media_type='application/pdf', headers=headers)
+
 
