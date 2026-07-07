@@ -179,10 +179,10 @@ def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data
             times = [r.timestamp for r in raw_data if r.timestamp]
             if len(times) > 0:
                 if room_name.lower() == "fablab":
-                    temp = [r.temperature for r in raw_data]
-                    hum = [r.humidity for r in raw_data]
-                    eco2 = [r.eco2 for r in raw_data]
-                    tvoc = [r.tvoc for r in raw_data]
+                    temp = [r.temperature if (r.temperature is not None and r.temperature != 0.0) else None for r in raw_data]
+                    hum = [r.humidity if (r.humidity is not None and r.humidity != 0.0) else None for r in raw_data]
+                    eco2 = [r.eco2 if (r.eco2 is not None and r.eco2 != 0) else None for r in raw_data]
+                    tvoc = [r.tvoc if (r.tvoc is not None and r.tvoc != 0) else None for r in raw_data]
                     
                     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6.2))
                     
@@ -225,11 +225,11 @@ def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data
                     ax2.tick_params(axis='x', rotation=15, labelsize=7)
                     
                 else: # cleanroom
-                    dht_t = [r.dht_temp for r in raw_data]
-                    dht_h = [r.dht_hum for r in raw_data]
-                    ds1 = [r.ds1_temp for r in raw_data]
-                    ds2 = [r.ds2_temp for r in raw_data]
-                    ds3 = [r.ds3_temp for r in raw_data]
+                    dht_t = [r.dht_temp if (r.dht_temp is not None and r.dht_temp != 0.0) else None for r in raw_data]
+                    dht_h = [r.dht_hum if (r.dht_hum is not None and r.dht_hum != 0.0) else None for r in raw_data]
+                    ds1 = [r.ds1_temp if (r.ds1_temp is not None and r.ds1_temp != 0.0) else None for r in raw_data]
+                    ds2 = [r.ds2_temp if (r.ds2_temp is not None and r.ds2_temp != 0.0) else None for r in raw_data]
+                    ds3 = [r.ds3_temp if (r.ds3_temp is not None and r.ds3_temp != 0.0) else None for r in raw_data]
                     
                     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6.2))
                     
