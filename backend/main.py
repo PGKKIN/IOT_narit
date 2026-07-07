@@ -94,6 +94,17 @@ last_alert_sent = {
     "fablab": None
 }
 
+# Downsampling control to avoid database growth (store every 30 seconds)
+last_db_write = {
+    "fablab": datetime.min,
+    "cleanroom": datetime.min
+}
+
+latest_readings = {
+    "fablab": None,
+    "cleanroom": None
+}
+
 # Track the timestamp when a sensor first reported 0.0 to check for continuous failure (require 10 minutes)
 zero_first_detected = {
     "dht_temp": None,
@@ -890,11 +901,23 @@ async def log_data(room: str, request: Request, background_tasks: BackgroundTask
     else:
         raise HTTPException(status_code=400, detail="Unsupported Media Type")
 
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    
-    # Trigger alerts asynchronously if thresholds are exceeded
+    # Update in-memory latest reading for real-time dashboard updates
+    now = datetime.now()
+    mem_item = sensor_data.model_dump()
+    mem_item["timestamp"] = now
+    latest_readings[room] = mem_item
+
+    # Downsample database insertion (log only every 30 seconds to prevent file bloat)
+    if now - last_db_write[room] >= timedelta(seconds=30):
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        last_db_write[room] = now
+    else:
+        # Not saved to DB, set timestamp for in-memory object to pass to checks
+        db_item.timestamp = now
+
+    # Trigger alerts asynchronously if thresholds are exceeded (using latest real-time values)
     if room == "fablab":
         check_and_trigger_alerts("fablab", db_item.humidity, db_item.temperature, background_tasks)
     elif room == "cleanroom":
@@ -911,14 +934,22 @@ def get_model_for_room(room: str):
 
 @app.get("/data/{room}/latest")
 def get_latest_data(room: str, response: Response, db: Session = Depends(get_db)):
+    # Serve from in-memory cache if fresh (within 90 seconds) to maintain responsiveness
+    latest_mem = latest_readings.get(room)
+    if latest_mem:
+        time_diff = datetime.now() - latest_mem["timestamp"]
+        if time_diff.total_seconds() < 90:
+            response.headers["X-Sensor-Active"] = "true"
+            return latest_mem
+
     model = get_model_for_room(room)
     latest = db.query(model).order_by(model.timestamp.desc()).first()
     if not latest:
         raise HTTPException(status_code=404, detail="No data found")
     
-    # Check if the latest data is active (within last 30 seconds)
+    # Check if the latest data is active (within last 90 seconds)
     time_diff = datetime.now() - latest.timestamp
-    is_active = "true" if time_diff.total_seconds() < 30 else "false"
+    is_active = "true" if time_diff.total_seconds() < 90 else "false"
     response.headers["X-Sensor-Active"] = is_active
     
     return latest
@@ -1310,7 +1341,7 @@ def export_pdf_endpoint(
         "total_records": len(data)
     }
     
-    pdf_bytes = generate_pdf_report(room, start_label, end_label, extra_stats, alerts_list)
+    pdf_bytes = generate_pdf_report(room, start_label, end_label, extra_stats, alerts_list, raw_data=data)
     
     file_start = start_dt.strftime('%d%m%Y') if start_dt else "Start"
     file_end = end_dt.strftime('%d%m%Y') if end_dt else "Now"

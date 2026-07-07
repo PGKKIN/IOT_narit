@@ -3,10 +3,10 @@ from datetime import datetime
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data: dict, alerts_data: list) -> bytes:
+def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data: dict, alerts_data: list, raw_data: list = None) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -167,6 +167,113 @@ def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data
         ]))
         elements.append(t_alerts)
         
+    # Section 3: Trend Charts (Generated dynamically from raw_data)
+    chart_flowable = None
+    if raw_data:
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+            
+            times = [r.timestamp for r in raw_data if r.timestamp]
+            if len(times) > 0:
+                if room_name.lower() == "fablab":
+                    temp = [r.temperature for r in raw_data]
+                    hum = [r.humidity for r in raw_data]
+                    eco2 = [r.eco2 for r in raw_data]
+                    tvoc = [r.tvoc for r in raw_data]
+                    
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6.2))
+                    
+                    # Temperature & Humidity (Dual Y-axis)
+                    ax1.plot(times, temp, label="Temp (°C)", color="#3b82f6", linewidth=1.2)
+                    ax1_right = ax1.twinx()
+                    ax1_right.plot(times, hum, label="Hum (%)", color="#10b981", linewidth=1.2)
+                    
+                    ax1.set_ylabel("Temperature (°C)", color="#3b82f6", fontsize=9)
+                    ax1_right.set_ylabel("Humidity (%)", color="#10b981", fontsize=9)
+                    ax1.tick_params(axis='y', labelcolor="#3b82f6", labelsize=8)
+                    ax1_right.tick_params(axis='y', labelcolor="#10b981", labelsize=8)
+                    ax1.set_title("Temperature & Humidity Trends", fontsize=10, fontweight='bold', color="#1e293b")
+                    
+                    lines1, labels1 = ax1.get_legend_handles_labels()
+                    lines2, labels2 = ax1_right.get_legend_handles_labels()
+                    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+                    ax1.grid(True, linestyle="--", alpha=0.3)
+                    
+                    # Air Quality (eCO2 & TVOC)
+                    ax2.plot(times, eco2, label="eCO2 (ppm)", color="#8b5cf6", linewidth=1.2)
+                    ax2_right = ax2.twinx()
+                    ax2_right.plot(times, tvoc, label="TVOC (ppb)", color="#f59e0b", linewidth=1.2)
+                    
+                    ax2.set_ylabel("eCO2 (ppm)", color="#8b5cf6", fontsize=9)
+                    ax2_right.set_ylabel("TVOC (ppb)", color="#f59e0b", fontsize=9)
+                    ax2.tick_params(axis='y', labelcolor="#8b5cf6", labelsize=8)
+                    ax2_right.tick_params(axis='y', labelcolor="#f59e0b", labelsize=8)
+                    ax2.set_title("Air Quality (eCO2 & TVOC) Trends", fontsize=10, fontweight='bold', color="#1e293b")
+                    
+                    lines1, labels1 = ax2.get_legend_handles_labels()
+                    lines2, labels2 = ax2_right.get_legend_handles_labels()
+                    ax2.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+                    ax2.grid(True, linestyle="--", alpha=0.3)
+                    
+                    # Format X Axis
+                    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m %H:%M'))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m %H:%M'))
+                    ax1.tick_params(axis='x', rotation=15, labelsize=7)
+                    ax2.tick_params(axis='x', rotation=15, labelsize=7)
+                    
+                else: # cleanroom
+                    dht_t = [r.dht_temp for r in raw_data]
+                    dht_h = [r.dht_hum for r in raw_data]
+                    ds1 = [r.ds1_temp for r in raw_data]
+                    ds2 = [r.ds2_temp for r in raw_data]
+                    ds3 = [r.ds3_temp for r in raw_data]
+                    
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6.2))
+                    
+                    # Temperatures
+                    ax1.plot(times, dht_t, label="DHT Ambient", color="#3b82f6", linewidth=1.2)
+                    ax1.plot(times, ds1, label="Air Inlet (DS1)", color="#22d3ee", linewidth=1.2)
+                    ax1.plot(times, ds2, label="Optical Table 1 (DS2)", color="#06b6d4", linewidth=1.2)
+                    ax1.plot(times, ds3, label="Optical Table 2 (DS3)", color="#0891b2", linewidth=1.2)
+                    
+                    ax1.set_ylabel("Temperature (°C)", fontsize=9)
+                    ax1.tick_params(axis='y', labelsize=8)
+                    ax1.set_title("Cleanroom Temperature Trends", fontsize=10, fontweight='bold', color="#1e293b")
+                    ax1.legend(loc="upper left", fontsize=8)
+                    ax1.grid(True, linestyle="--", alpha=0.3)
+                    
+                    # Humidity
+                    ax2.plot(times, dht_h, label="DHT Humidity", color="#10b981", linewidth=1.2)
+                    ax2.set_ylabel("Humidity (%)", fontsize=9)
+                    ax2.tick_params(axis='y', labelsize=8)
+                    ax2.set_title("Cleanroom Humidity Trends", fontsize=10, fontweight='bold', color="#1e293b")
+                    ax2.legend(loc="upper left", fontsize=8)
+                    ax2.grid(True, linestyle="--", alpha=0.3)
+                    
+                    # Format X Axis
+                    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m %H:%M'))
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m %H:%M'))
+                    ax1.tick_params(axis='x', rotation=15, labelsize=7)
+                    ax2.tick_params(axis='x', rotation=15, labelsize=7)
+                
+                fig.tight_layout()
+                chart_buf = io.BytesIO()
+                plt.savefig(chart_buf, format='png', bbox_inches='tight', dpi=180)
+                chart_buf.seek(0)
+                plt.close(fig)
+                
+                chart_flowable = Image(chart_buf, width=480, height=330)
+        except Exception as plot_err:
+            print(f"[PDF Chart] Error plotting pdf chart: {plot_err}")
+
+    if chart_flowable:
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("3. Environmental Sensor Trend Charts", h2_style))
+        elements.append(chart_flowable)
+
     elements.append(Spacer(1, 20))
     elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cbd5e1'), spaceAfter=10))
     elements.append(Paragraph("Confidential Internal Document — National Astronomical Research Institute of Thailand (NARIT)", ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#94a3b8'), alignment=1)))

@@ -37,7 +37,9 @@ import {
   Minimize2,
   CheckCircle2,
   Save,
-  Info
+  Info,
+  Copy,
+  Camera
 } from 'lucide-react';
 
 const API_BASE_URL = `http://${window.location.hostname}:8000`;
@@ -86,6 +88,63 @@ const themeBorders = {
   'text-red-500': 'rgba(239, 68, 68, 0.4)',
   'text-purple-500': 'rgba(168, 85, 247, 0.4)',
   'text-cyan-500': 'rgba(6, 182, 212, 0.4)',
+};
+
+const insertOfflineGaps = (data) => {
+  if (!data || data.length === 0) return data;
+  
+  const result = [];
+  const gapThresholdMs = 3 * 60 * 1000; // 3 minutes gap represents downtime
+  
+  for (let i = 0; i < data.length; i++) {
+    const currentItem = data[i];
+    
+    if (i > 0) {
+      const prevItem = data[i - 1];
+      const prevTime = new Date(prevItem.timestamp ? prevItem.timestamp.replace(' ', 'T') : '').getTime();
+      const currTime = new Date(currentItem.timestamp ? currentItem.timestamp.replace(' ', 'T') : '').getTime();
+      
+      if (!isNaN(prevTime) && !isNaN(currTime) && (currTime - prevTime) > gapThresholdMs) {
+        // Insert a null point 30 seconds after the last valid point
+        const gapStartTime = new Date(prevTime + 30000);
+        const gapStartStr = gapStartTime.toISOString().replace('T', ' ').substring(0, 19);
+        
+        result.push({
+          timestamp: gapStartStr,
+          temperature: null,
+          humidity: null,
+          eco2: null,
+          tvoc: null,
+          dht_temp: null,
+          dht_hum: null,
+          ds1_temp: null,
+          ds2_temp: null,
+          ds3_temp: null,
+          isOfflineGap: true
+        });
+
+        // Insert a null point 30 seconds before the current valid point
+        const gapEndTime = new Date(currTime - 30000);
+        const gapEndStr = gapEndTime.toISOString().replace('T', ' ').substring(0, 19);
+        
+        result.push({
+          timestamp: gapEndStr,
+          temperature: null,
+          humidity: null,
+          eco2: null,
+          tvoc: null,
+          dht_temp: null,
+          dht_hum: null,
+          ds1_temp: null,
+          ds2_temp: null,
+          ds3_temp: null,
+          isOfflineGap: true
+        });
+      }
+    }
+    result.push(currentItem);
+  }
+  return result;
 };
 
 const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDarkMode }) => {
@@ -419,15 +478,15 @@ const App = () => {
     fetchConfigData();
   }, []);
 
-  // Chart Axis Limit States (Custom yMin/yMax settings)
-  const [tempYMin, setTempYMin] = useState('');
-  const [tempYMax, setTempYMax] = useState('');
-  const [humYMin, setHumYMin] = useState('');
-  const [humYMax, setHumYMax] = useState('');
-  const [co2YMin, setCo2YMin] = useState('');
-  const [co2YMax, setCo2YMax] = useState('');
-  const [tvocYMin, setTvocYMin] = useState('');
-  const [tvocYMax, setTvocYMax] = useState('');
+  // Chart Axis Limit States (Custom yMin/yMax settings) - Persisted in localStorage
+  const [tempYMin, setTempYMin] = useState(() => localStorage.getItem('tempYMin') || '');
+  const [tempYMax, setTempYMax] = useState(() => localStorage.getItem('tempYMax') || '');
+  const [humYMin, setHumYMin] = useState(() => localStorage.getItem('humYMin') || '');
+  const [humYMax, setHumYMax] = useState(() => localStorage.getItem('humYMax') || '');
+  const [co2YMin, setCo2YMin] = useState(() => localStorage.getItem('co2YMin') || '');
+  const [co2YMax, setCo2YMax] = useState(() => localStorage.getItem('co2YMax') || '');
+  const [tvocYMin, setTvocYMin] = useState(() => localStorage.getItem('tvocYMin') || '');
+  const [tvocYMax, setTvocYMax] = useState(() => localStorage.getItem('tvocYMax') || '');
 
   // Refs for mouse-drag vertical/horizontal panning
   const dragStartXRef = useRef(null);
@@ -438,7 +497,26 @@ const App = () => {
   const dragDirectionRef = useRef(null); // 'horizontal', 'vertical', or null
 
   // Theme, Filter, Clock States
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('isDarkMode');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Persist Theme and Axis Limit settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('isDarkMode', isDarkMode);
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('tempYMin', tempYMin);
+    localStorage.setItem('tempYMax', tempYMax);
+    localStorage.setItem('humYMin', humYMin);
+    localStorage.setItem('humYMax', humYMax);
+    localStorage.setItem('co2YMin', co2YMin);
+    localStorage.setItem('co2YMax', co2YMax);
+    localStorage.setItem('tvocYMin', tvocYMin);
+    localStorage.setItem('tvocYMax', tvocYMax);
+  }, [tempYMin, tempYMax, humYMin, humYMax, co2YMin, co2YMax, tvocYMin, tvocYMax]);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [resolution, setResolution] = useState(0);
@@ -561,7 +639,8 @@ const App = () => {
       }
       
       const response = await axios.get(`${API_BASE_URL}/data/${activeTab}/history`, { params });
-      const formattedData = response.data.map(item => {
+      const dataWithGaps = insertOfflineGaps(response.data);
+      const formattedData = dataWithGaps.map(item => {
         const dateStr = item.timestamp ? item.timestamp.replace(' ', 'T') : '';
         const parsedDate = new Date(dateStr);
         const displayTime = isNaN(parsedDate.getTime()) 
@@ -586,6 +665,257 @@ const App = () => {
       setHistoryData(formattedData);
     } catch (error) {
       console.error("Error fetching history data", error);
+    }
+  };
+
+  const handleDownloadChart = async (ref, fileName) => {
+    try {
+      if (!ref.current) return;
+      const svgElement = ref.current.querySelector('svg');
+      if (!svgElement) {
+        showToast("ไม่พบ SVG ของกราฟ", "error");
+        return;
+      }
+      
+      // Parse legend items from default Recharts legend element
+      const legendItems = [];
+      const legendEl = ref.current.querySelector('.recharts-default-legend');
+      if (legendEl) {
+        const items = legendEl.querySelectorAll('.recharts-legend-item');
+        items.forEach(item => {
+          const textEl = item.querySelector('.recharts-legend-item-text');
+          const surface = item.querySelector('.recharts-surface');
+          let color = '#3b82f6';
+          if (surface) {
+            const path = surface.querySelector('path');
+            const circle = surface.querySelector('circle');
+            if (path) {
+              color = path.getAttribute('fill') || path.getAttribute('stroke') || color;
+            } else if (circle) {
+              color = circle.getAttribute('fill') || circle.getAttribute('stroke') || color;
+            }
+          }
+          legendItems.push({
+            text: textEl ? textEl.textContent : '',
+            color: color
+          });
+        });
+      }
+
+      const svgClone = svgElement.cloneNode(true);
+      const width = svgElement.clientWidth || 800;
+      const height = svgElement.clientHeight || 400;
+      svgClone.setAttribute('width', width);
+      svgClone.setAttribute('height', height);
+      
+      const isDark = isDarkMode;
+      const bg = isDark ? '#1e293b' : '#ffffff';
+      const textColor = isDark ? '#f8fafc' : '#334155';
+      
+      const styleElement = document.createElement('style');
+      styleElement.innerHTML = `
+        svg { background-color: ${bg}; color: ${textColor}; font-family: sans-serif; }
+        text { fill: ${textColor}; }
+        .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: ${isDark ? '#334155' : '#e2e8f0'}; }
+      `;
+      svgClone.insertBefore(styleElement, svgClone.firstChild);
+      
+      const svgString = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+      
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width * 2;
+        canvas.height = (height + 35) * 2; // Allocate extra space for legend at bottom
+        const context = canvas.getContext('2d');
+        context.scale(2, 2);
+        
+        context.fillStyle = bg;
+        context.fillRect(0, 0, width, height + 35);
+        context.drawImage(image, 0, 0, width, height);
+        
+        // Draw Legend manually onto canvas space below chart
+        if (legendItems.length > 0) {
+          context.font = '11px sans-serif';
+          context.textBaseline = 'middle';
+          
+          let totalWidth = 0;
+          const spacing = 15;
+          const itemWidths = [];
+          
+          legendItems.forEach(item => {
+            const textWidth = context.measureText(item.text).width;
+            const itemWidth = 14 + 5 + textWidth; // dot + text
+            itemWidths.push(itemWidth);
+            totalWidth += itemWidth;
+          });
+          totalWidth += (legendItems.length - 1) * spacing;
+          
+          let startX = (width - totalWidth) / 2;
+          const startY = height + 18;
+          
+          legendItems.forEach((item, idx) => {
+            // Draw color dot
+            context.fillStyle = item.color;
+            context.beginPath();
+            context.arc(startX + 5, startY, 4, 0, 2 * Math.PI);
+            context.fill();
+            
+            // Draw text
+            context.fillStyle = textColor;
+            context.fillText(item.text, startX + 13, startY);
+            
+            startX += itemWidths[idx] + spacing;
+          });
+        }
+        
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${fileName}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          showToast("บันทึกรูปภาพกราฟสำเร็จ!", "success");
+        }, 'image/png');
+        
+        URL.revokeObjectURL(blobURL);
+      };
+      image.src = blobURL;
+    } catch (err) {
+      console.error(err);
+      showToast("ไม่สามารถสร้างรูปภาพกราฟได้", "error");
+    }
+  };
+
+  const handleCopyChart = async (ref) => {
+    try {
+      if (!ref.current) return;
+      const svgElement = ref.current.querySelector('svg');
+      if (!svgElement) {
+        showToast("ไม่พบ SVG ของกราฟ", "error");
+        return;
+      }
+      
+      // Parse legend items from default Recharts legend element
+      const legendItems = [];
+      const legendEl = ref.current.querySelector('.recharts-default-legend');
+      if (legendEl) {
+        const items = legendEl.querySelectorAll('.recharts-legend-item');
+        items.forEach(item => {
+          const textEl = item.querySelector('.recharts-legend-item-text');
+          const surface = item.querySelector('.recharts-surface');
+          let color = '#3b82f6';
+          if (surface) {
+            const path = surface.querySelector('path');
+            const circle = surface.querySelector('circle');
+            if (path) {
+              color = path.getAttribute('fill') || path.getAttribute('stroke') || color;
+            } else if (circle) {
+              color = circle.getAttribute('fill') || circle.getAttribute('stroke') || color;
+            }
+          }
+          legendItems.push({
+            text: textEl ? textEl.textContent : '',
+            color: color
+          });
+        });
+      }
+
+      const svgClone = svgElement.cloneNode(true);
+      const width = svgElement.clientWidth || 800;
+      const height = svgElement.clientHeight || 400;
+      svgClone.setAttribute('width', width);
+      svgClone.setAttribute('height', height);
+      
+      const isDark = isDarkMode;
+      const bg = isDark ? '#1e293b' : '#ffffff';
+      const textColor = isDark ? '#f8fafc' : '#334155';
+      
+      const styleElement = document.createElement('style');
+      styleElement.innerHTML = `
+        svg { background-color: ${bg}; color: ${textColor}; font-family: sans-serif; }
+        text { fill: ${textColor}; }
+        .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: ${isDark ? '#334155' : '#e2e8f0'}; }
+      `;
+      svgClone.insertBefore(styleElement, svgClone.firstChild);
+      
+      const svgString = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+      
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width * 2;
+        canvas.height = (height + 35) * 2; // Allocate extra space for legend at bottom
+        const context = canvas.getContext('2d');
+        context.scale(2, 2);
+        
+        context.fillStyle = bg;
+        context.fillRect(0, 0, width, height + 35);
+        context.drawImage(image, 0, 0, width, height);
+        
+        // Draw Legend manually onto canvas space below chart
+        if (legendItems.length > 0) {
+          context.font = '11px sans-serif';
+          context.textBaseline = 'middle';
+          
+          let totalWidth = 0;
+          const spacing = 15;
+          const itemWidths = [];
+          
+          legendItems.forEach(item => {
+            const textWidth = context.measureText(item.text).width;
+            const itemWidth = 14 + 5 + textWidth; // dot + text
+            itemWidths.push(itemWidth);
+            totalWidth += itemWidth;
+          });
+          totalWidth += (legendItems.length - 1) * spacing;
+          
+          let startX = (width - totalWidth) / 2;
+          const startY = height + 18;
+          
+          legendItems.forEach((item, idx) => {
+            // Draw color dot
+            context.fillStyle = item.color;
+            context.beginPath();
+            context.arc(startX + 5, startY, 4, 0, 2 * Math.PI);
+            context.fill();
+            
+            // Draw text
+            context.fillStyle = textColor;
+            context.fillText(item.text, startX + 13, startY);
+            
+            startX += itemWidths[idx] + spacing;
+          });
+        }
+        
+        canvas.toBlob(async (blob) => {
+          if (!blob) return;
+          try {
+            const data = [new ClipboardItem({ [blob.type]: blob })];
+            await navigator.clipboard.write(data);
+            showToast("คัดลอกรูปภาพกราฟลง Clipboard สำเร็จ! (สามารถกด Ctrl+V วางใน Word ได้เลย)", "success");
+          } catch (clipErr) {
+            console.error(clipErr);
+            showToast("เบราว์เซอร์ไม่รองรับการคัดลอกรูปภาพโดยตรง ลองใช้ปุ่มดาวน์โหลดแทน", "warning");
+          }
+        }, 'image/png');
+        
+        URL.revokeObjectURL(blobURL);
+      };
+      image.src = blobURL;
+    } catch (err) {
+      console.error(err);
+      showToast("ไม่สามารถคัดลอกรูปภาพกราฟได้", "error");
     }
   };
 
@@ -1113,132 +1443,7 @@ const App = () => {
         </div>
       </div>
 
-      {/* Chart Settings Accordion / Panel */}
-      <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-5 mb-8`}>
-        <details className="group">
-          <summary className={`flex justify-between items-center font-semibold cursor-pointer list-none ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>
-            <span className="flex items-center gap-2">
-              <Sliders size={18} className="text-blue-500" />
-              Chart Axis Limit Settings (กำหนดขอบเขตแกน Y)
-            </span>
-            <span className="transition group-open:rotate-180">
-              <svg fill="none" height="24" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
-            </span>
-          </summary>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-5 pt-5 border-t border-slate-700/50">
-            {/* Temp Limits */}
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-                <Thermometer size={14} className="text-blue-500" /> Temperature Y-Axis (°C)
-              </span>
-              <div className="flex gap-2 items-center">
-                <input 
-                  type="number" 
-                  placeholder="Min (Auto)" 
-                  value={tempYMin} 
-                  onChange={(e) => setTempYMin(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-                <span className="text-xs opacity-50">to</span>
-                <input 
-                  type="number" 
-                  placeholder="Max (Auto)" 
-                  value={tempYMax} 
-                  onChange={(e) => setTempYMax(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-              </div>
-            </div>
-            
-            {/* Hum Limits */}
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-                <Droplets size={14} className="text-emerald-500" /> Humidity Y-Axis (%)
-              </span>
-              <div className="flex gap-2 items-center">
-                <input 
-                  type="number" 
-                  placeholder="Min (Auto)" 
-                  value={humYMin} 
-                  onChange={(e) => setHumYMin(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-                <span className="text-xs opacity-50">to</span>
-                <input 
-                  type="number" 
-                  placeholder="Max (Auto)" 
-                  value={humYMax} 
-                  onChange={(e) => setHumYMax(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-              </div>
-            </div>
 
-            {/* eCO2 Limits */}
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-                <Wind size={14} className="text-purple-500" /> eCO2 Y-Axis (ppm)
-              </span>
-              <div className="flex gap-2 items-center">
-                <input 
-                  type="number" 
-                  placeholder="Min (Auto)" 
-                  value={co2YMin} 
-                  onChange={(e) => setCo2YMin(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-                <span className="text-xs opacity-50">to</span>
-                <input 
-                  type="number" 
-                  placeholder="Max (Auto)" 
-                  value={co2YMax} 
-                  onChange={(e) => setCo2YMax(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-              </div>
-            </div>
-
-            {/* TVOC Limits */}
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider opacity-70 flex items-center gap-1">
-                <Activity size={14} className="text-orange-500" /> TVOC Y-Axis (ppb)
-              </span>
-              <div className="flex gap-2 items-center">
-                <input 
-                  type="number" 
-                  placeholder="Min (Auto)" 
-                  value={tvocYMin} 
-                  onChange={(e) => setTvocYMin(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-                <span className="text-xs opacity-50">to</span>
-                <input 
-                  type="number" 
-                  placeholder="Max (Auto)" 
-                  value={tvocYMax} 
-                  onChange={(e) => setTvocYMax(e.target.value)} 
-                  className={`theme-input ${isDarkMode ? 'dark' : 'light'} w-full text-xs py-1.5`}
-                />
-              </div>
-            </div>
-          </div>
-          {(tempYMin || tempYMax || humYMin || humYMax || co2YMin || co2YMax || tvocYMin || tvocYMax) && (
-            <div className="flex justify-end mt-4">
-              <button 
-                onClick={() => {
-                  setTempYMin(''); setTempYMax('');
-                  setHumYMin(''); setHumYMax('');
-                  setCo2YMin(''); setCo2YMax('');
-                  setTvocYMin(''); setTvocYMax('');
-                }}
-                className="text-xs text-red-500 hover:text-red-600 font-semibold px-3 py-1.5 border border-red-500/20 hover:border-red-500/50 rounded-lg transition-colors"
-              >
-                Reset Y-Limits
-              </button>
-            </div>
-          )}
-        </details>
-      </div>
 
       {/* Tabs */}
       <div className="flex mb-8">
@@ -1290,21 +1495,62 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Temperature Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
                 <div>
                   <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Temperature History</h3>
                   <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
                     💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
                   </p>
                 </div>
-                {(tempYMin !== '' || tempYMax !== '') && (
-                  <button 
-                    onClick={() => { setTempYMin(''); setTempYMax(''); }}
-                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
-                  >
-                    Reset View
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1.5 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">Y-Limit:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={tempYMin} 
+                      onChange={(e) => setTempYMin(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={tempYMax} 
+                      onChange={(e) => setTempYMax(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                  
+                  {/* Reset view */}
+                  {(tempYMin !== '' || tempYMax !== '') && (
+                    <button 
+                      onClick={() => { setTempYMin(''); setTempYMax(''); }}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
+                    <button 
+                      onClick={() => handleCopyChart(fablabTempChartRef)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
+                      title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadChart(fablabTempChartRef, "FabLab_Temperature")}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
+                      title="Save graph image as PNG (บันทึกรูปกราฟ)"
+                    >
+                      <Camera size={15} />
+                    </button>
+                  </div>
+                </div>
               </div>
               <div 
                 ref={fablabTempChartRef} 
@@ -1323,14 +1569,14 @@ const App = () => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
-                    <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="displayTime" height={45} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} label={{ value: 'Time (เวลา)', position: 'insideBottom', offset: -5, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 11 } }} />
                     <YAxis 
                       domain={getTempDomain(10, 40)} 
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"} 
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -1364,21 +1610,62 @@ const App = () => {
 
             {/* Humidity Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
                 <div>
                   <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Humidity History</h3>
                   <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
                     💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
                   </p>
                 </div>
-                {(humYMin !== '' || humYMax !== '') && (
-                  <button 
-                    onClick={() => { setHumYMin(''); setHumYMax(''); }}
-                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
-                  >
-                    Reset View
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1.5 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">Y-Limit:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={humYMin} 
+                      onChange={(e) => setHumYMin(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={humYMax} 
+                      onChange={(e) => setHumYMax(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                  
+                  {/* Reset view */}
+                  {(humYMin !== '' || humYMax !== '') && (
+                    <button 
+                      onClick={() => { setHumYMin(''); setHumYMax(''); }}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
+                    <button 
+                      onClick={() => handleCopyChart(fablabHumChartRef)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
+                      title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadChart(fablabHumChartRef, "FabLab_Humidity")}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
+                      title="Save graph image as PNG (บันทึกรูปกราฟ)"
+                    >
+                      <Camera size={15} />
+                    </button>
+                  </div>
+                </div>
               </div>
               <div 
                 ref={fablabHumChartRef} 
@@ -1397,14 +1684,14 @@ const App = () => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
-                    <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="displayTime" height={45} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} label={{ value: 'Time (เวลา)', position: 'insideBottom', offset: -5, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 11 } }} />
                     <YAxis 
                       domain={getHumDomain()} 
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"} 
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'Humidity (%)', angle: -90, position: 'insideLeft', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'Humidity (%)', angle: -90, position: 'insideLeft', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -1438,21 +1725,82 @@ const App = () => {
 
             {/* Air Quality (eCO2 & TVOC) Chart */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 lg:col-span-2`}>
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
                 <div>
                   <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Air Quality (eCO2 & TVOC)</h3>
                   <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
                     💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
                   </p>
                 </div>
-                {(co2YMin !== '' || co2YMax !== '' || tvocYMin !== '' || tvocYMax !== '') && (
-                  <button 
-                    onClick={() => { setCo2YMin(''); setCo2YMax(''); setTvocYMin(''); setTvocYMax(''); }}
-                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
-                  >
-                    Reset View
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* eCO2 Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">eCO2:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={co2YMin} 
+                      onChange={(e) => setCo2YMin(e.target.value)} 
+                      className={`w-12 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={co2YMax} 
+                      onChange={(e) => setCo2YMax(e.target.value)} 
+                      className={`w-12 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+
+                  {/* TVOC Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">TVOC:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={tvocYMin} 
+                      onChange={(e) => setTvocYMin(e.target.value)} 
+                      className={`w-12 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={tvocYMax} 
+                      onChange={(e) => setTvocYMax(e.target.value)} 
+                      className={`w-12 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                  
+                  {/* Reset view */}
+                  {(co2YMin !== '' || co2YMax !== '' || tvocYMin !== '' || tvocYMax !== '') && (
+                    <button 
+                      onClick={() => { setCo2YMin(''); setCo2YMax(''); setTvocYMin(''); setTvocYMax(''); }}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
+                    <button 
+                      onClick={() => handleCopyChart(fablabAqChartRef)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
+                      title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadChart(fablabAqChartRef, "FabLab_AirQuality")}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
+                      title="Save graph image as PNG (บันทึกรูปกราฟ)"
+                    >
+                      <Camera size={15} />
+                    </button>
+                  </div>
+                </div>
               </div>
               <div 
                 ref={fablabAqChartRef} 
@@ -1475,7 +1823,7 @@ const App = () => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
-                    <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="displayTime" height={45} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} label={{ value: 'Time (เวลา)', position: 'insideBottom', offset: -5, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 11 } }} />
                     <YAxis 
                       yAxisId="left" 
                       domain={getCo2Domain()} 
@@ -1483,7 +1831,7 @@ const App = () => {
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'eCO2 (ppm)', angle: -90, position: 'insideLeft', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'eCO2 (ppm)', angle: -90, position: 'insideLeft', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <YAxis 
                       yAxisId="right" 
@@ -1493,7 +1841,7 @@ const App = () => {
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'TVOC (ppb)', angle: 90, position: 'insideRight', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'TVOC (ppb)', angle: 90, position: 'insideRight', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -1542,21 +1890,62 @@ const App = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Cleanroom Temperatures */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
                 <div>
                   <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Temperatures</h3>
                   <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
                     💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
                   </p>
                 </div>
-                {(tempYMin !== '' || tempYMax !== '') && (
-                  <button 
-                    onClick={() => { setTempYMin(''); setTempYMax(''); }}
-                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
-                  >
-                    Reset View
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1.5 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">Y-Limit:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={tempYMin} 
+                      onChange={(e) => setTempYMin(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={tempYMax} 
+                      onChange={(e) => setTempYMax(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                  
+                  {/* Reset view */}
+                  {(tempYMin !== '' || tempYMax !== '') && (
+                    <button 
+                      onClick={() => { setTempYMin(''); setTempYMax(''); }}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
+                    <button 
+                      onClick={() => handleCopyChart(cleanroomTempChartRef)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
+                      title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadChart(cleanroomTempChartRef, "CleanRoom_Temperatures")}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
+                      title="Save graph image as PNG (บันทึกรูปกราฟ)"
+                    >
+                      <Camera size={15} />
+                    </button>
+                  </div>
+                </div>
               </div>
               <div 
                 ref={cleanroomTempChartRef} 
@@ -1569,14 +1958,14 @@ const App = () => {
                     margin={{ top: 10, right: 10, left: 20, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
-                    <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="displayTime" height={45} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} label={{ value: 'Time (เวลา)', position: 'insideBottom', offset: -5, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 11 } }} />
                     <YAxis 
                       domain={getTempDomain(10, 40)} 
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"} 
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
@@ -1613,21 +2002,62 @@ const App = () => {
 
             {/* Cleanroom Humidity */}
             <div className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6`}>
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
                 <div>
                   <h3 className={`text-lg font-medium ${isDarkMode ? 'text-gray-200' : 'text-slate-800'}`}>Cleanroom Humidity</h3>
                   <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} select-none mt-0.5`}>
                     💡 คลิกค้างลากเพื่อเลื่อนแกน | สกรอลเมาส์เพื่อซูมเวลา
                   </p>
                 </div>
-                {(humYMin !== '' || humYMax !== '') && (
-                  <button 
-                    onClick={() => { setHumYMin(''); setHumYMax(''); }}
-                    className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
-                  >
-                    Reset View
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Y-Axis Limit Controls */}
+                  <div className="flex items-center gap-1.5 bg-slate-500/5 dark:bg-slate-500/10 p-1 rounded-lg border border-slate-200/50 dark:border-slate-800/50">
+                    <span className="text-[10px] font-semibold opacity-70 px-1">Y-Limit:</span>
+                    <input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={humYMin} 
+                      onChange={(e) => setHumYMin(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <span className="text-[10px] opacity-50">-</span>
+                    <input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={humYMax} 
+                      onChange={(e) => setHumYMax(e.target.value)} 
+                      className={`w-14 text-center text-xs py-0.5 rounded border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                  
+                  {/* Reset view */}
+                  {(humYMin !== '' || humYMax !== '') && (
+                    <button 
+                      onClick={() => { setHumYMin(''); setHumYMax(''); }}
+                      className="text-[11px] text-red-500 hover:text-red-400 font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/10"
+                    >
+                      Reset
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
+                    <button 
+                      onClick={() => handleCopyChart(cleanroomHumChartRef)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
+                      title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button 
+                      onClick={() => handleDownloadChart(cleanroomHumChartRef, "CleanRoom_Humidity")}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
+                      title="Save graph image as PNG (บันทึกรูปกราฟ)"
+                    >
+                      <Camera size={15} />
+                    </button>
+                  </div>
+                </div>
               </div>
               <div 
                 ref={cleanroomHumChartRef} 
@@ -1646,14 +2076,14 @@ const App = () => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} />
-                    <XAxis dataKey="displayTime" stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="displayTime" height={45} stroke={isDarkMode ? "#94a3b8" : "#64748b"} tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} tickLine={false} axisLine={false} label={{ value: 'Time (เวลา)', position: 'insideBottom', offset: -5, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 11 } }} />
                     <YAxis 
                       domain={getHumDomain()} 
                       stroke={isDarkMode ? "#94a3b8" : "#64748b"} 
                       tick={{fill: isDarkMode ? '#94a3b8' : '#64748b'}} 
                       tickLine={false} 
                       axisLine={false}
-                      label={{ value: 'Humidity (%)', angle: -90, position: 'insideLeft', offset: -10, style: { fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
+                      label={{ value: 'Humidity (%)', angle: -90, position: 'insideLeft', offset: -10, style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 12 } }}
                     />
                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeWidth: 1, strokeDasharray: '3 3' }} />
                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
