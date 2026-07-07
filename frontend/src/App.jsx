@@ -169,13 +169,13 @@ const insertOfflineGaps = (data) => {
   return result;
 };
 
-const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDarkMode }) => {
-  const t = theme || colorMap.blue;
+const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDarkMode, isOffline, lastValidValue }) => {
+  const t = isOffline ? colorMap.red : (theme || colorMap.blue);
   const glowColor = themeGlows[t.icon] || 'rgba(59, 130, 246, 0.12)';
   const borderColor = themeBorders[t.icon] || 'rgba(51, 65, 85, 0.8)';
   return (
     <div 
-      className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 flex flex-col relative overflow-hidden group border-t-4 border-t-transparent hover:border-t-current ${t.text}`}
+      className={`theme-card ${isDarkMode ? 'dark' : 'light'} p-6 flex flex-col relative overflow-hidden group border-t-4 ${isOffline ? 'border-t-red-500' : 'border-t-transparent hover:border-t-current'} ${t.text}`}
       style={{
         '--card-glow-color': glowColor,
         '--card-border-color': borderColor,
@@ -185,21 +185,35 @@ const StatCard = ({ title, value, unit, icon: Icon, theme, alert, subtitle, isDa
         <Icon size={100} className={t.icon} />
       </div>
       <div className={`flex justify-between items-start mb-4 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
-        <h3 className="font-medium">{title}</h3>
+        <h3 className="font-medium flex items-center gap-1.5">
+          {title}
+          {isOffline && (
+            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-red-500/20 text-red-500 border border-red-500/20 animate-pulse">
+              OFFLINE
+            </span>
+          )}
+        </h3>
         <div className={`p-2 rounded-lg ${t.bg} ${t.icon}`}>
           <Icon size={20} />
         </div>
       </div>
       <div className="flex items-end gap-2">
-        <span className={`text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{value != null ? value : '--'}</span>
-        <span className={`${isDarkMode ? 'text-gray-400' : 'text-slate-500'} mb-1`}>{unit}</span>
+        <span className={`text-4xl font-bold ${isOffline ? (isDarkMode ? 'text-red-400' : 'text-red-600') : (isDarkMode ? 'text-white' : 'text-slate-800')}`}>
+          {isOffline ? (lastValidValue != null ? lastValidValue : '--') : (value != null ? value : '--')}
+        </span>
+        <span className={`${isOffline ? 'text-red-400/80' : (isDarkMode ? 'text-gray-400' : 'text-slate-500')} mb-1`}>{unit}</span>
       </div>
-      {subtitle && (
+      {isOffline && (
+        <div className={`mt-3 text-xs font-semibold ${isDarkMode ? 'text-red-400/70' : 'text-red-600/70'}`}>
+          ล่าสุด: {lastValidValue != null ? `${lastValidValue} ${unit}` : 'ไม่มีข้อมูล'}
+        </div>
+      )}
+      {!isOffline && subtitle && (
         <div className={`mt-3 text-sm font-semibold ${t.text}`}>
           {subtitle}
         </div>
       )}
-      {alert && (
+      {!isOffline && alert && (
         <div className={`mt-3 flex items-start text-xs p-3 rounded-lg border ${
           isDarkMode 
             ? 'text-gray-300 bg-slate-800/60 border-slate-700/50' 
@@ -690,7 +704,7 @@ const App = () => {
     }
   };
 
-  const handleDownloadChart = async (ref, fileName) => {
+  const handleDownloadChart = async (ref, fileName, chartTitle) => {
     try {
       if (!ref.current) return;
       const svgElement = ref.current.querySelector('svg');
@@ -725,8 +739,12 @@ const App = () => {
       }
 
       const svgClone = svgElement.cloneNode(true);
-      const width = svgElement.clientWidth || 800;
-      const height = svgElement.clientHeight || 400;
+      const originalWidth = svgElement.clientWidth || 800;
+      const originalHeight = svgElement.clientHeight || 400;
+      const width = Math.max(900, originalWidth); // Enforce min width of 900px for optimal legend spacing and clarity
+      const height = Math.min(520, Math.round(originalHeight * (width / originalWidth))); // Cap height at 520px to increase Y-axis scale while keeping it balanced
+      
+      svgClone.setAttribute('viewBox', `0 0 ${originalWidth} ${originalHeight}`);
       svgClone.setAttribute('width', width);
       svgClone.setAttribute('height', height);
       
@@ -750,18 +768,33 @@ const App = () => {
       const image = new Image();
       image.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = width * 2;
-        canvas.height = (height + 35) * 2; // Allocate extra space for legend at bottom
+        const padX = 50;
+        const padY = 100;
+        const extraTop = 35;
+        const extraBottom = 22;
+        
+        canvas.width = (width + padX * 2) * 2;
+        canvas.height = (height + extraTop + extraBottom + padY * 2) * 2;
         const context = canvas.getContext('2d');
         context.scale(2, 2);
         
         context.fillStyle = bg;
-        context.fillRect(0, 0, width, height + 35);
-        context.drawImage(image, 0, 0, width, height);
+        context.fillRect(0, 0, width + padX * 2, height + extraTop + extraBottom + padY * 2);
+        
+        // Draw Chart Title at the top
+        if (chartTitle) {
+          context.font = 'bold 14px sans-serif';
+          context.fillStyle = textColor;
+          context.textAlign = 'center';
+          context.fillText(chartTitle, width / 2 + padX, padY + 20);
+          context.textAlign = 'left'; // Reset alignment to default
+        }
+        
+        context.drawImage(image, padX, padY + extraTop, width, height);
         
         // Draw Legend manually onto canvas space below chart
         if (legendItems.length > 0) {
-          context.font = '11px sans-serif';
+          context.font = '12px sans-serif';
           context.textBaseline = 'middle';
           
           let totalWidth = 0;
@@ -770,25 +803,25 @@ const App = () => {
           
           legendItems.forEach(item => {
             const textWidth = context.measureText(item.text).width;
-            const itemWidth = 14 + 5 + textWidth; // dot + text
+            const itemWidth = 16 + 6 + textWidth; // dot + text padding
             itemWidths.push(itemWidth);
             totalWidth += itemWidth;
           });
           totalWidth += (legendItems.length - 1) * spacing;
           
-          let startX = (width - totalWidth) / 2;
-          const startY = height + 18;
+          let startX = (width + padX * 2 - totalWidth) / 2;
+          const startY = height + extraTop + padY + 10; // Shifted legend up closer to the graph
           
           legendItems.forEach((item, idx) => {
             // Draw color dot
             context.fillStyle = item.color;
             context.beginPath();
-            context.arc(startX + 5, startY, 4, 0, 2 * Math.PI);
+            context.arc(startX + 6, startY, 5, 0, 2 * Math.PI); // slightly larger dot
             context.fill();
             
             // Draw text
             context.fillStyle = textColor;
-            context.fillText(item.text, startX + 13, startY);
+            context.fillText(item.text, startX + 16, startY); // shift text to prevent overlapping with larger dot
             
             startX += itemWidths[idx] + spacing;
           });
@@ -816,7 +849,7 @@ const App = () => {
     }
   };
 
-  const handleCopyChart = async (ref) => {
+  const handleCopyChart = async (ref, chartTitle) => {
     try {
       if (!ref.current) return;
       const svgElement = ref.current.querySelector('svg');
@@ -851,8 +884,12 @@ const App = () => {
       }
 
       const svgClone = svgElement.cloneNode(true);
-      const width = svgElement.clientWidth || 800;
-      const height = svgElement.clientHeight || 400;
+      const originalWidth = svgElement.clientWidth || 800;
+      const originalHeight = svgElement.clientHeight || 400;
+      const width = Math.max(900, originalWidth); // Enforce min width of 900px for optimal legend spacing and clarity
+      const height = Math.min(520, Math.round(originalHeight * (width / originalWidth))); // Cap height at 520px to increase Y-axis scale while keeping it balanced
+      
+      svgClone.setAttribute('viewBox', `0 0 ${originalWidth} ${originalHeight}`);
       svgClone.setAttribute('width', width);
       svgClone.setAttribute('height', height);
       
@@ -876,18 +913,33 @@ const App = () => {
       const image = new Image();
       image.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = width * 2;
-        canvas.height = (height + 35) * 2; // Allocate extra space for legend at bottom
+        const padX = 50;
+        const padY = 100;
+        const extraTop = 35;
+        const extraBottom = 22;
+        
+        canvas.width = (width + padX * 2) * 2;
+        canvas.height = (height + extraTop + extraBottom + padY * 2) * 2;
         const context = canvas.getContext('2d');
         context.scale(2, 2);
         
         context.fillStyle = bg;
-        context.fillRect(0, 0, width, height + 35);
-        context.drawImage(image, 0, 0, width, height);
+        context.fillRect(0, 0, width + padX * 2, height + extraTop + extraBottom + padY * 2);
+        
+        // Draw Chart Title at the top
+        if (chartTitle) {
+          context.font = 'bold 14px sans-serif';
+          context.fillStyle = textColor;
+          context.textAlign = 'center';
+          context.fillText(chartTitle, width / 2 + padX, padY + 20);
+          context.textAlign = 'left'; // Reset alignment to default
+        }
+        
+        context.drawImage(image, padX, padY + extraTop, width, height);
         
         // Draw Legend manually onto canvas space below chart
         if (legendItems.length > 0) {
-          context.font = '11px sans-serif';
+          context.font = '12px sans-serif';
           context.textBaseline = 'middle';
           
           let totalWidth = 0;
@@ -896,25 +948,25 @@ const App = () => {
           
           legendItems.forEach(item => {
             const textWidth = context.measureText(item.text).width;
-            const itemWidth = 14 + 5 + textWidth; // dot + text
+            const itemWidth = 16 + 6 + textWidth; // dot + text padding
             itemWidths.push(itemWidth);
             totalWidth += itemWidth;
           });
           totalWidth += (legendItems.length - 1) * spacing;
           
-          let startX = (width - totalWidth) / 2;
-          const startY = height + 18;
+          let startX = (width + padX * 2 - totalWidth) / 2;
+          const startY = height + extraTop + padY + 10; // Shifted legend up closer to the graph
           
           legendItems.forEach((item, idx) => {
             // Draw color dot
             context.fillStyle = item.color;
             context.beginPath();
-            context.arc(startX + 5, startY, 4, 0, 2 * Math.PI);
+            context.arc(startX + 6, startY, 5, 0, 2 * Math.PI); // slightly larger dot
             context.fill();
             
             // Draw text
             context.fillStyle = textColor;
-            context.fillText(item.text, startX + 13, startY);
+            context.fillText(item.text, startX + 16, startY); // shift text to prevent overlapping with larger dot
             
             startX += itemWidths[idx] + spacing;
           });
@@ -1506,12 +1558,60 @@ const App = () => {
       {activeTab === 'fablab' ? (
         <>
           {/* Fablab Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <StatCard title="Temperature" value={latestData?.temperature?.toFixed(1)} unit="°C" icon={Thermometer} theme={colorMap.blue} isDarkMode={isDarkMode} />
-            <StatCard title="Humidity" value={latestData?.humidity?.toFixed(1)} unit="%" icon={Droplets} theme={colorMap.blue} isDarkMode={isDarkMode} />
-            <StatCard title="eCO2" value={latestData?.eco2} unit="ppm" icon={Wind} theme={getCO2Status(latestData?.eco2).theme} subtitle={getCO2Status(latestData?.eco2).text} alert={getCO2Status(latestData?.eco2).desc} isDarkMode={isDarkMode} />
-            <StatCard title="TVOC" value={latestData?.tvoc} unit="ppb" icon={Activity} theme={getTVOCStatus(latestData?.tvoc).theme} alert={getTVOCStatus(latestData?.tvoc).alert} isDarkMode={isDarkMode} />
-          </div>
+          {(() => {
+            const isFablabTempOffline = !isSensorActive || latestData?.temperature === 0.0 || latestData?.temperature === null || latestData?.temperature === undefined;
+            const isFablabHumOffline = !isSensorActive || latestData?.humidity === 0.0 || latestData?.humidity === null || latestData?.humidity === undefined;
+            const isFablabEco2Offline = !isSensorActive || latestData?.eco2 === 0 || latestData?.eco2 === null || latestData?.eco2 === undefined;
+            const isFablabTvocOffline = !isSensorActive || latestData?.tvoc === 0 || latestData?.tvoc === null || latestData?.tvoc === undefined;
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <StatCard 
+                  title="Temperature" 
+                  value={latestData?.temperature?.toFixed(1)} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  theme={colorMap.blue} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isFablabTempOffline} 
+                  lastValidValue={latestData?.last_valid?.temperature?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="Humidity" 
+                  value={latestData?.humidity?.toFixed(1)} 
+                  unit="%" 
+                  icon={Droplets} 
+                  theme={colorMap.blue} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isFablabHumOffline} 
+                  lastValidValue={latestData?.last_valid?.humidity?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="eCO2" 
+                  value={latestData?.eco2} 
+                  unit="ppm" 
+                  icon={Wind} 
+                  theme={getCO2Status(latestData?.eco2).theme} 
+                  subtitle={getCO2Status(latestData?.eco2).text} 
+                  alert={getCO2Status(latestData?.eco2).desc} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isFablabEco2Offline} 
+                  lastValidValue={latestData?.last_valid?.eco2} 
+                />
+                <StatCard 
+                  title="TVOC" 
+                  value={latestData?.tvoc} 
+                  unit="ppb" 
+                  icon={Activity} 
+                  theme={getTVOCStatus(latestData?.tvoc).theme} 
+                  alert={getTVOCStatus(latestData?.tvoc).alert} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isFablabTvocOffline} 
+                  lastValidValue={latestData?.last_valid?.tvoc} 
+                />
+              </div>
+            );
+          })()}
 
           {/* Fablab Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1558,14 +1658,14 @@ const App = () => {
                   {/* Actions */}
                   <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
                     <button 
-                      onClick={() => handleCopyChart(fablabTempChartRef)}
+                      onClick={() => handleCopyChart(fablabTempChartRef, "FabLab Temperature Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
                       title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
                     >
                       <Copy size={15} />
                     </button>
                     <button 
-                      onClick={() => handleDownloadChart(fablabTempChartRef, "FabLab_Temperature")}
+                      onClick={() => handleDownloadChart(fablabTempChartRef, "FabLab_Temperature", "FabLab Temperature Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
                       title="Save graph image as PNG (บันทึกรูปกราฟ)"
                     >
@@ -1673,14 +1773,14 @@ const App = () => {
                   {/* Actions */}
                   <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
                     <button 
-                      onClick={() => handleCopyChart(fablabHumChartRef)}
+                      onClick={() => handleCopyChart(fablabHumChartRef, "FabLab Humidity Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
                       title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
                     >
                       <Copy size={15} />
                     </button>
                     <button 
-                      onClick={() => handleDownloadChart(fablabHumChartRef, "FabLab_Humidity")}
+                      onClick={() => handleDownloadChart(fablabHumChartRef, "FabLab_Humidity", "FabLab Humidity Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
                       title="Save graph image as PNG (บันทึกรูปกราฟ)"
                     >
@@ -1808,14 +1908,14 @@ const App = () => {
                   {/* Actions */}
                   <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
                     <button 
-                      onClick={() => handleCopyChart(fablabAqChartRef)}
+                      onClick={() => handleCopyChart(fablabAqChartRef, "FabLab Air Quality (eCO2 & TVOC)")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
                       title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
                     >
                       <Copy size={15} />
                     </button>
                     <button 
-                      onClick={() => handleDownloadChart(fablabAqChartRef, "FabLab_AirQuality")}
+                      onClick={() => handleDownloadChart(fablabAqChartRef, "FabLab_AirQuality", "FabLab Air Quality (eCO2 & TVOC)")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
                       title="Save graph image as PNG (บันทึกรูปกราฟ)"
                     >
@@ -1900,13 +2000,68 @@ const App = () => {
       ) : (
         <>
           {/* Cleanroom Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
-            <StatCard title="DHT Temp" value={latestData?.dht_temp?.toFixed(1)} unit="°C" icon={Thermometer} theme={colorMap.blue} isDarkMode={isDarkMode} />
-            <StatCard title="DHT Hum" value={latestData?.dht_hum?.toFixed(1)} unit="%" icon={Droplets} theme={colorMap.blue} isDarkMode={isDarkMode} />
-            <StatCard title="Air Inlet" value={latestData?.ds1_temp?.toFixed(1)} unit="°C" icon={Thermometer} theme={colorMap.cyan} isDarkMode={isDarkMode} />
-            <StatCard title="Optical Table 1" value={latestData?.ds2_temp?.toFixed(1)} unit="°C" icon={Thermometer} theme={colorMap.cyan} isDarkMode={isDarkMode} />
-            <StatCard title="Optical Table 2" value={latestData?.ds3_temp?.toFixed(1)} unit="°C" icon={Thermometer} theme={colorMap.cyan} isDarkMode={isDarkMode} />
-          </div>
+          {(() => {
+            const isCleanroomDhtTempOffline = !isSensorActive || latestData?.dht_temp === 0.0 || latestData?.dht_temp === null || latestData?.dht_temp === undefined;
+            const isCleanroomDhtHumOffline = !isSensorActive || latestData?.dht_hum === 0.0 || latestData?.dht_hum === null || latestData?.dht_hum === undefined;
+            const isCleanroomDs1TempOffline = !isSensorActive || latestData?.ds1_temp === 0.0 || latestData?.ds1_temp === null || latestData?.ds1_temp === undefined;
+            const isCleanroomDs2TempOffline = !isSensorActive || latestData?.ds2_temp === 0.0 || latestData?.ds2_temp === null || latestData?.ds2_temp === undefined;
+            const isCleanroomDs3TempOffline = !isSensorActive || latestData?.ds3_temp === 0.0 || latestData?.ds3_temp === null || latestData?.ds3_temp === undefined;
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+                <StatCard 
+                  title="DHT Temp" 
+                  value={latestData?.dht_temp?.toFixed(1)} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  theme={colorMap.blue} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isCleanroomDhtTempOffline} 
+                  lastValidValue={latestData?.last_valid?.dht_temp?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="DHT Hum" 
+                  value={latestData?.dht_hum?.toFixed(1)} 
+                  unit="%" 
+                  icon={Droplets} 
+                  theme={colorMap.blue} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isCleanroomDhtHumOffline} 
+                  lastValidValue={latestData?.last_valid?.dht_hum?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="Air Inlet" 
+                  value={latestData?.ds1_temp?.toFixed(1)} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  theme={colorMap.cyan} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isCleanroomDs1TempOffline} 
+                  lastValidValue={latestData?.last_valid?.ds1_temp?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="Optical Table 1" 
+                  value={latestData?.ds2_temp?.toFixed(1)} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  theme={colorMap.cyan} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isCleanroomDs2TempOffline} 
+                  lastValidValue={latestData?.last_valid?.ds2_temp?.toFixed(1)} 
+                />
+                <StatCard 
+                  title="Optical Table 2" 
+                  value={latestData?.ds3_temp?.toFixed(1)} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  theme={colorMap.cyan} 
+                  isDarkMode={isDarkMode} 
+                  isOffline={isCleanroomDs3TempOffline} 
+                  lastValidValue={latestData?.last_valid?.ds3_temp?.toFixed(1)} 
+                />
+              </div>
+            );
+          })()}
 
           {/* Cleanroom Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1953,14 +2108,14 @@ const App = () => {
                   {/* Actions */}
                   <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
                     <button 
-                      onClick={() => handleCopyChart(cleanroomTempChartRef)}
+                      onClick={() => handleCopyChart(cleanroomTempChartRef, "Cleanroom Temperature Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
                       title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
                     >
                       <Copy size={15} />
                     </button>
                     <button 
-                      onClick={() => handleDownloadChart(cleanroomTempChartRef, "CleanRoom_Temperatures")}
+                      onClick={() => handleDownloadChart(cleanroomTempChartRef, "CleanRoom_Temperatures", "Cleanroom Temperature Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
                       title="Save graph image as PNG (บันทึกรูปกราฟ)"
                     >
@@ -2065,14 +2220,14 @@ const App = () => {
                   {/* Actions */}
                   <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-slate-800 pl-2">
                     <button 
-                      onClick={() => handleCopyChart(cleanroomHumChartRef)}
+                      onClick={() => handleCopyChart(cleanroomHumChartRef, "Cleanroom Humidity Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-slate-500/10 transition-colors"
                       title="Copy graph image to clipboard (คัดลอกรูปภาพกราฟ)"
                     >
                       <Copy size={15} />
                     </button>
                     <button 
-                      onClick={() => handleDownloadChart(cleanroomHumChartRef, "CleanRoom_Humidity")}
+                      onClick={() => handleDownloadChart(cleanroomHumChartRef, "CleanRoom_Humidity", "Cleanroom Humidity Trends")}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-500/10 transition-colors"
                       title="Save graph image as PNG (บันทึกรูปกราฟ)"
                     >

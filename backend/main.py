@@ -932,6 +932,39 @@ def get_model_for_room(room: str):
         return models.CleanroomData
     raise HTTPException(status_code=404, detail="Room not found")
 
+def build_latest_response_dict(room: str, latest_record, db: Session):
+    if room == "fablab":
+        fields = ["temperature", "humidity", "eco2", "tvoc"]
+        model = models.FablabData
+    else:
+        fields = ["dht_temp", "dht_hum", "ds1_temp", "ds2_temp", "ds3_temp"]
+        model = models.CleanroomData
+
+    if hasattr(latest_record, "__dict__"):
+        res = {k: v for k, v in latest_record.__dict__.items() if not k.startswith("_")}
+    else:
+        res = dict(latest_record)
+
+    last_valid = {}
+    for f in fields:
+        val = res.get(f)
+        if val == 0.0 or val == 0 or val is None:
+            # Query last non-zero, non-null value from database
+            last_rec = db.query(model).filter(
+                getattr(model, f) != 0.0,
+                getattr(model, f) != 0,
+                getattr(model, f) != None
+            ).order_by(model.timestamp.desc()).first()
+            if last_rec:
+                last_valid[f] = getattr(last_rec, f)
+            else:
+                last_valid[f] = None
+        else:
+            last_valid[f] = val
+
+    res["last_valid"] = last_valid
+    return res
+
 @app.get("/data/{room}/latest")
 def get_latest_data(room: str, response: Response, db: Session = Depends(get_db)):
     # Serve from in-memory cache if fresh (within 90 seconds) to maintain responsiveness
@@ -940,7 +973,7 @@ def get_latest_data(room: str, response: Response, db: Session = Depends(get_db)
         time_diff = datetime.now() - latest_mem["timestamp"]
         if time_diff.total_seconds() < 90:
             response.headers["X-Sensor-Active"] = "true"
-            return latest_mem
+            return build_latest_response_dict(room, latest_mem, db)
 
     model = get_model_for_room(room)
     latest = db.query(model).order_by(model.timestamp.desc()).first()
@@ -952,7 +985,7 @@ def get_latest_data(room: str, response: Response, db: Session = Depends(get_db)
     is_active = "true" if time_diff.total_seconds() < 90 else "false"
     response.headers["X-Sensor-Active"] = is_active
     
-    return latest
+    return build_latest_response_dict(room, latest, db)
 
 def parse_iso_datetime(dt_str: str) -> datetime:
     try:

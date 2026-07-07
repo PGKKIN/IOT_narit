@@ -170,6 +170,15 @@ def generate_pdf_report(room_name: str, start_str: str, end_str: str, stats_data
     # Section 3: Trend Charts (Generated dynamically from raw_data)
     chart_flowable = None
     if raw_data:
+        # Downsample data if it exceeds 500 records to make the PDF lightweight and the chart clean
+        max_plot_points = 500
+        if len(raw_data) > max_plot_points:
+            step = len(raw_data) // max_plot_points
+            decimated = raw_data[::step]
+            if raw_data[-1] not in decimated:
+                decimated.append(raw_data[-1])
+            raw_data = decimated
+
         try:
             import matplotlib
             matplotlib.use('Agg')
