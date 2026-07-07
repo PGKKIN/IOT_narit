@@ -93,8 +93,29 @@ const themeBorders = {
 const insertOfflineGaps = (data) => {
   if (!data || data.length === 0) return data;
   
+  // Calculate median time step dynamically to handle varying resolutions
+  const stepSizes = [];
+  for (let i = 1; i < data.length; i++) {
+    const prevItem = data[i - 1];
+    const currentItem = data[i];
+    const prevTime = new Date(prevItem.timestamp ? prevItem.timestamp.replace(' ', 'T') : '').getTime();
+    const currTime = new Date(currentItem.timestamp ? currentItem.timestamp.replace(' ', 'T') : '').getTime();
+    if (!isNaN(prevTime) && !isNaN(currTime)) {
+      const diff = currTime - prevTime;
+      if (diff > 0) {
+        stepSizes.push(diff);
+      }
+    }
+  }
+  
+  // Sort to find the median step size, defaulting to 1 minute if not enough points
+  stepSizes.sort((a, b) => a - b);
+  const medianStep = stepSizes.length > 0 ? stepSizes[Math.floor(stepSizes.length / 2)] : (60 * 1000);
+  
+  // Gap threshold is 3 minutes or 2.5 times the median step size, whichever is larger
+  const gapThresholdMs = Math.max(3 * 60 * 1000, medianStep * 2.5);
+  
   const result = [];
-  const gapThresholdMs = 3 * 60 * 1000; // 3 minutes gap represents downtime
   
   for (let i = 0; i < data.length; i++) {
     const currentItem = data[i];
@@ -105,8 +126,9 @@ const insertOfflineGaps = (data) => {
       const currTime = new Date(currentItem.timestamp ? currentItem.timestamp.replace(' ', 'T') : '').getTime();
       
       if (!isNaN(prevTime) && !isNaN(currTime) && (currTime - prevTime) > gapThresholdMs) {
-        // Insert a null point 30 seconds after the last valid point
-        const gapStartTime = new Date(prevTime + 30000);
+        // Insert a null point 10% of medianStep (max 30s) after the last valid point
+        const gapOffset = Math.min(30000, medianStep * 0.1);
+        const gapStartTime = new Date(prevTime + gapOffset);
         const gapStartStr = gapStartTime.toISOString().replace('T', ' ').substring(0, 19);
         
         result.push({
@@ -123,8 +145,8 @@ const insertOfflineGaps = (data) => {
           isOfflineGap: true
         });
 
-        // Insert a null point 30 seconds before the current valid point
-        const gapEndTime = new Date(currTime - 30000);
+        // Insert a null point 10% of medianStep (max 30s) before the current valid point
+        const gapEndTime = new Date(currTime - gapOffset);
         const gapEndStr = gapEndTime.toISOString().replace('T', ' ').substring(0, 19);
         
         result.push({

@@ -4,12 +4,14 @@
   "smtp_email": "copphotonicchip@gmail.com",
   "smtp_password": "ajlv dgqh cqql ueiq",
   "recipient_emails": [
-    "kandanaikid@gmail.com"
+    "kandanaikid@gmail.com",
+    "jirayu@narit.or.th"
   ],
   "humidity_threshold_cleanroom": 80.0,
   "humidity_threshold_fablab": 65.0,
+  "temp_threshold_high": 40.0,
+  "temp_threshold_low": 10.0,
   "alert_cooldown_minutes": 30,
   "daily_summary_time": "08:30",
-  "recipient_email": "copphotonicchip@gmail.com",
-  "temp_threshold_high": 40.0
+  "recipient_email": "copphotonicchip@gmail.com"
 }

@@ -21,11 +21,11 @@ try:
         try:
             res_fab = requests.post(f"{SERVER_URL}/fablab", data=fablab_payload)
             if res_fab.status_code == 200:
-                print(f"✅ Fablab Success: Temp={fablab_payload['temperature']}")
+                print(f"[OK] Fablab Success: Temp={fablab_payload['temperature']}")
             else:
-                print(f"❌ Fablab Failed: {res_fab.status_code}")
+                print(f"[ERROR] Fablab Failed: {res_fab.status_code}")
         except requests.exceptions.ConnectionError:
-            print("❌ Connection Error: Is FastAPI running?")
+            print("[ERROR] Connection Error: Is FastAPI running?")
 
         # --- Cleanroom Data ---
         cleanroom_payload = {
@@ -39,9 +39,9 @@ try:
         try:
             res_clean = requests.post(f"{SERVER_URL}/cleanroom", data=cleanroom_payload)
             if res_clean.status_code == 200:
-                print(f"✅ Cleanroom Success: DHT_Temp={cleanroom_payload['dht_temp']}")
+                print(f"[OK] Cleanroom Success: DHT_Temp={cleanroom_payload['dht_temp']}")
             else:
-                print(f"❌ Cleanroom Failed: {res_clean.status_code}")
+                print(f"[ERROR] Cleanroom Failed: {res_clean.status_code}")
         except requests.exceptions.ConnectionError:
             pass
 
